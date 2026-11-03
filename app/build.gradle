@@ -1,0 +1,78 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'dev.kaipi.android'
+    ndkVersion '27.0.12077973'
+    compileSdk 35
+    buildToolsVersion "35.0.0"
+    defaultConfig {
+        applicationId 'dev.kaipi.android'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        externalNativeBuild { cmake { cppFlags '-std=c++17 -Wall -Wextra' } }
+    }
+    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
+    // Python packages legitimately contain directories such as zipfile/_path and httpx/_transports.
+    androidResources { ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~' }
+    packaging { jniLibs { useLegacyPackaging = true } }
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/runtime-assets')
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+
+tasks.register('checkTerminalAssets') {
+    doLast {
+        ['xterm.js', 'xterm.css', 'addon-fit.js'].each {
+            if (!file("src/main/assets/terminal/vendor/$it").exists()) {
+                throw new GradleException('Run npm install --ignore-scripts && npm run assets first.')
+            }
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'checkTerminalAssets' }
+
+tasks.register('checkRuntime') {
+    doLast {
+        ['arm64-v8a', 'x86_64'].each { abi ->
+            ['libkaipi_python.so', 'libkaipi_git.so'].each { name ->
+                if (!file("src/main/jniLibs/$abi/$name").exists())
+                    throw new GradleException('Run python3 scripts/build-runtime.py first.')
+            }
+        }
+        if (!file('src/main/assets/runtime-status.json').exists())
+            throw new GradleException('Missing runtime build report; run scripts/build-runtime.py.')
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'checkRuntime' }
+// Refresh bundled code on APK upgrades, while leaving HOME and workspaces intact.
+tasks.register('runtimeIdentity') {
+    dependsOn 'checkRuntime'
+    def payload = files(fileTree('src/main/assets/runtime'), fileTree('src/main/assets/runtime-abi'))
+    def output = layout.buildDirectory.file('generated/runtime-assets/runtime-id')
+    inputs.files(payload)
+    outputs.file(output)
+    doLast {
+        def hash = java.security.MessageDigest.getInstance('SHA-256')
+        payload.files.sort { it.path }.each { source ->
+            hash.update(project.relativePath(source).getBytes('UTF-8'))
+            hash.update((byte) 0)
+            hash.update(source.bytes)
+        }
+        output.get().asFile.parentFile.mkdirs()
+        output.get().asFile.text = hash.digest().encodeHex().toString()
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'runtimeIdentity' }
+tasks.configureEach { task ->
+    if (task.name == 'preReleaseBuild') task.doFirst {
+        def report = new groovy.json.JsonSlurper().parse(file('src/main/assets/runtime-status.json'))
+        if (!report.unavailableNative.isEmpty())
+            throw new GradleException("Runtime is incomplete: ${report.unavailableNative.join(', ')}")
+    }
+}

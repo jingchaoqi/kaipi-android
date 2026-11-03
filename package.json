@@ -1,0 +1,5 @@
+{
+  "name": "kaipi-android-terminal", "private": true, "version": "0.1.0",
+  "scripts": {"assets": "node scripts/copy-assets.mjs", "test": "node --test tests/*.test.mjs"},
+  "dependencies": {"@xterm/xterm": "5.5.0", "@xterm/addon-fit": "0.10.0"}
+}

@@ -1,0 +1,103 @@
+name: Build APK
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.4'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install build toolchains
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1'
+          rustup toolchain install 1.90.0 --profile minimal
+
+      # Keep portable build inputs/outputs; recreate the host Python venv on each runner.
+      - name: Cache native runtime builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools/runtime/downloads
+            .tools/runtime/sources
+            .tools/runtime/wheels
+            .tools/runtime/stdlib
+            .tools/runtime/arm64-v8a
+            .tools/runtime/x86_64
+            .tools/runtime/pyo3-*.txt
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/build-apk.yml', 'scripts/build-runtime.py', 'scripts/runtime.lock.json', 'vendor/kaipi/uv.lock', 'app/src/main/cpp/python.c') }}
+
+      - name: Build terminal assets and run host tests
+        run: |
+          npm ci --ignore-scripts
+          npm run assets
+          node tests/keys.test.mjs
+          sh scripts/test-native.sh
+
+      - name: Build Android runtime
+        run: python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
+
+      - name: Build and check APK
+        run: |
+          ./gradlew --no-daemon :app:assembleDebug :app:lintDebug
+          python3 tests/test_runtime_package.py
+
+      - name: Prepare download
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/kaipi-android-debug.apk
+          cd dist
+          sha256sum kaipi-android-debug.apk > SHA256SUMS
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaipi-android-debug-${{ github.run_number }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/
+            app/src/main/assets/runtime-status.json
+            vendor/kaipi/REVISION
+          retention-days: 14

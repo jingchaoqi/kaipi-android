@@ -1,0 +1,14 @@
+.gradle/
+**/build/
+local.properties
+node_modules/
+app/src/main/assets/terminal/vendor/
+.tools/
+*.apk
+**/.cxx/
+__pycache__/
+*.pyc
+app/src/main/jniLibs/
+app/src/main/assets/runtime/python/
+app/src/main/assets/runtime-abi/
+app/src/main/assets/runtime-status.json

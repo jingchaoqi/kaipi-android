@@ -1,0 +1,201 @@
+"""Context assembly (§2.4). Pure: (leaf, reference edges, archived set) -> request."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+from kaipi import graph
+from kaipi.attachments import TAG as ATTACHMENT_TAG
+from kaipi.attachments import Input
+from kaipi.model import GraftBlock, Message, Node, ReferenceEdge, blocks, text_of, texts
+from kaipi.store import State
+
+GRAFT_TAG = "<kaipi:graft"
+GUARD_TAG = "<kaipi:guard>"
+GUARD_TEXT = (
+    f"{GUARD_TAG}This branch is an exploration: it is read-only. Inspect and reason, but do "
+    "not create, modify or delete files, and do not run commands that change the working "
+    "tree.</kaipi:guard>"
+)
+# Frozen payloads carry the notice that was true when they were written, and re-pinning the
+# trunk changes which branch may write without touching a byte of them (§3.1). So the change
+# is announced the only way that keeps the prefix identical: appended to the new input, where
+# the newest notice wins. It costs once - the turn after it, the lineage already says so.
+RELEASE_TEXT = (
+    f"{GUARD_TAG}This branch is the trunk now, so the read-only notice earlier in this "
+    "conversation no longer applies: you may create, modify and delete files again. The "
+    "latest notice is the one in force.</kaipi:guard>"
+)
+
+
+class Context(BaseModel):
+    system: str
+    messages: list[Message]
+    cache_points: list[int] = Field(default_factory=list)  # message indices (fork, lineage end)
+    grafts: list[GraftBlock] = Field(default_factory=list)
+    payload_start: int  # index in `messages` where the new node's own payload begins
+
+
+# --- reading a frozen node -------------------------------------------------
+
+
+def classify(text: str) -> str:
+    """Classify user text as input, graft, guard notice, or an attachment snapshot.
+    The tags are the only thing that distinguishes them, so only this function reads them."""
+    if text.startswith(GRAFT_TAG):
+        return "graft"
+    if text.startswith(ATTACHMENT_TAG):
+        return "attachment"
+    return "guard" if text.startswith(GUARD_TAG) else "user"
+
+
+def user_input(node: Node) -> str:
+    for m in node.payload:
+        if m["role"] != "user":
+            continue
+        said = [t for t in texts(m["content"]) if classify(t) not in ("guard", "attachment")]
+        if said and classify(said[0]) == "user":
+            return "\n".join(said)
+    return ""
+
+
+def has_attachments(node: Node) -> bool:
+    return any(
+        block.get("type") in ("image", "document")
+        or (block.get("type") == "text" and classify(block["text"]) == "attachment")
+        for message in node.payload
+        if message["role"] == "user"
+        for block in blocks(message["content"])
+    )
+
+
+def final_answer(node: Node) -> str:
+    for m in reversed(node.payload):
+        if m["role"] == "assistant":
+            return text_of(m["content"])
+    return ""
+
+
+def tool_calls(node: Node) -> list[tuple[str, str]]:
+    """(tool_use id, command) for every bash call in the turn."""
+    out: list[tuple[str, str]] = []
+    for m in node.payload:
+        if m["role"] == "assistant":
+            for b in blocks(m["content"]):
+                if b.get("type") == "tool_use":
+                    out.append((b["id"], str(b.get("input", {}).get("command", ""))))
+    return out
+
+
+def tool_outputs(node: Node, ids: list[str]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for m in node.payload:
+        if m["role"] == "user":
+            for b in blocks(m["content"]):
+                if b.get("type") == "tool_result" and b.get("tool_use_id") in ids:
+                    out.append((b["tool_use_id"], text_of(b.get("content", ""))))
+    return out
+
+
+# --- grafts -------------------------------------------------------------------
+
+
+def leaf_text(n: Node) -> str:
+    return f"[user]\n{user_input(n)}\n[assistant]\n{final_answer(n)}"
+
+
+def render_graft(state: State, edge: ReferenceEdge, leaf_id: str | None) -> GraftBlock:
+    src = state.nodes[edge.src_id]
+    if src.status in ("tombstone", "aborted"):
+        # Grafting an aborted node would put back exactly what stopping it discarded.
+        raise ValueError(f"cannot graft {src.status} node {edge.src_id}")
+    if leaf_id is not None and graph.is_ancestor(state, edge.src_id, leaf_id):
+        raise ValueError(f"{edge.src_id} is already in this lineage; nothing to graft")
+    parts: list[str] = [f"{GRAFT_TAG} src={src.id} depth={edge.depth}>"]
+    if edge.depth == "branch":
+        for n in graph.path_below_lca(state, src.id, leaf_id):
+            parts.append(f"<node id={n.id}>\n{leaf_text(n)}\n</node>")
+    else:
+        parts.append(leaf_text(src))
+        if edge.depth == "leaf+summary":
+            parts.append(f"[path summary]\n{src.summary or '(no summary available)'}")
+    for tid, out in tool_outputs(src, edge.include_tool_outputs):
+        parts.append(f"<tool_output id={tid}>\n{out}\n</tool_output>")
+    parts.append("</kaipi:graft>")
+    return GraftBlock(
+        src_id=src.id,
+        depth=edge.depth,
+        include_tool_outputs=list(edge.include_tool_outputs),
+        text="\n".join(parts),
+    )
+
+
+def graft_message(grafts: list[GraftBlock]) -> Message:
+    """All grafts in ONE user message so they occupy a single cache position."""
+    return {"role": "user", "content": [{"type": "text", "text": g.text} for g in grafts]}
+
+
+def input_message(text: str, *, notice: str = "") -> Message:
+    blocks: list[dict[str, object]] = []
+    if notice:
+        blocks.append({"type": "text", "text": notice})
+    blocks.append({"type": "text", "text": str(text)})
+    if isinstance(text, Input):
+        blocks.extend(text.blocks())
+    return {"role": "user", "content": blocks}
+
+
+def standing_notice(messages: list[Message]) -> str:
+    """The last guard notice in what has been said so far - what the model currently believes
+    about writing to disk. User role only, like every other tag reader here: a model that
+    quotes the notice back, or a `cat` of this file, must not count as kaipi saying it."""
+    for m in reversed(messages):
+        if m["role"] != "user":
+            continue
+        for t in texts(m["content"]):
+            if classify(t) == "guard":
+                return t
+    return ""
+
+
+# --- assembly -------------------------------------------------------------------
+
+
+def build(
+    state: State,
+    leaf_id: str | None,
+    edges: list[ReferenceEdge],
+    text: str,
+    *,
+    guard: bool = False,
+) -> Context:
+    messages: list[Message] = []
+    points: set[int] = set()  # the two moving cache breakpoints: fork point, lineage end (§7)
+    if leaf_id is not None:
+        if state.nodes[leaf_id].status != "live":
+            raise ValueError(f"{leaf_id} is not live")
+        fork = graph.fork_point(state, leaf_id)
+        for n in graph.live_lineage(state, leaf_id):
+            messages.extend(n.payload)
+            if n.id in (fork, leaf_id):
+                points.add(len(messages) - 1)
+    # What the lineage last said about writing, and what is true now. Any standing notice
+    # that is not already the release is one to overrule - not only today's exact wording:
+    # payloads are frozen, so a session resumed from an older version carries whatever that
+    # version said, and comparing for equality would leave it read-only for good.
+    standing = standing_notice(messages)
+    notice = (
+        GUARD_TEXT if guard else (RELEASE_TEXT if standing and standing != RELEASE_TEXT else "")
+    )
+    grafts = [render_graft(state, e, leaf_id) for e in edges]
+    payload_start = len(messages)
+    if grafts:
+        messages.append(graft_message(grafts))
+    messages.append(input_message(text, notice=notice))
+    return Context(
+        system=state.system_prompt,
+        messages=messages,
+        cache_points=sorted(p for p in points if p >= 0),
+        grafts=grafts,
+        payload_start=payload_start,
+    )

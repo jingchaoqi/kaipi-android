@@ -1,0 +1,10 @@
+{
+  "python": "3.13.16-0",
+  "python_sha256": {
+    "stdlib": "68e3f71e6e2f2a2febb22f2d3575657787b3dd94f07d2c6f3780461babbcbf58",
+    "arm64-v8a": "fae8cfd4d3910b6f978b22279fe820c0c6ba49d0ea20f7b106aa6130f1c8f355",
+    "x86_64": "77a6a3325aff0a171c36c11c8c3b2204a53783a3d42c29cff10a5ddecee5bfb6"
+  },
+  "git": "2.50.1",
+  "git_sha256": "7e3e6c36decbd8f1eedd14d42db6674be03671c2204864befa2a41756c5c8fc4"
+}
