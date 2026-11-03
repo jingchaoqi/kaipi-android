@@ -47,7 +47,7 @@ APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
 工作流安装固定版本的构建工具，编译仓库中已锁定的 kaipi 核心及 Android 原生依赖，运行快捷键、主机 PTY、APK 完整性测试和 Android lint。原生构建与 Gradle/npm 依赖使用缓存；首次运行需要完整编译。CI 不运行 Android 交互验收。
 
-成功后，在该次运行的 **Artifacts** 中下载 `kaipi-android-debug-<运行编号>`，解压得到 `kaipi-android-debug.apk` 和 `SHA256SUMS`。一个 APK 同时包含 arm64-v8a 和 x86_64，使用默认调试签名。构建报告另存为 `build-reports-<运行编号>`，产物保留 14 天。此流程只上传 Actions 构建产物，不创建 GitHub Release。
+成功后，在该次运行的 **Artifacts** 中下载 `kaipi-android-debug-<运行编号>`，解压得到 `kaipi-android-debug.apk` 和 `SHA256SUMS`。一个 APK 同时包含 arm64-v8a 和 x86_64。预览版使用仓库内公开的 `app/debug.keystore`，让后续 CI 构建可覆盖安装；此开发密钥不能用于正式发行。最初的第 3 次构建使用临时签名，升级到固定签名需要先备份数据并卸载旧包。构建报告另存为 `build-reports-<运行编号>`，产物保留 14 天。此流程只上传 Actions 构建产物，不创建 GitHub Release。
 
 ## 验证
 
@@ -56,10 +56,12 @@ node tests/keys.test.mjs
 sh scripts/test-native.sh
 python3 tests/test_runtime_package.py
 # 安装并打开调试 APK，等待运行时初始化；连接 adb 后：
-python3 scripts/test-android.py
+python3 scripts/test-android.py  # 主机需 openssl，自动生成临时 TLS 测试证书
 ```
 
-快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存及实际 HTTP 请求；模型端点是本地 mock，不能代替真实 API 与交互测试。
+快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存，以及 OpenAI/Anthropic 协议的 HTTPS 请求与流式响应；同时验证不可信证书会被拒绝。模型端点是本地 mock，不能代替真实 API 与交互测试。
+
+Android 入口通过 `SSL_CERT_FILE` 指向随 APK 打包的 certifi CA，保留显式配置的证书路径。独立 CPython 没有可用的 OpenSSL 系统证书目录；不配置时，Anthropic SDK 的 httpx2 会在 HTTPS 握手失败后显示 `APIConnectionError: Connection error`。价格表来自本地文件，其显示不能证明 API 连通。
 
 2026-11-03 验证结果：
 
@@ -68,6 +70,8 @@ python3 scripts/test-android.py
 - Android lint：0 errors、4 warnings（JavaScript、备份规则、图标和国际化提示）。
 - Android 11 x86_64 模拟器中，CPython/原生模块/kaipi 导入、本地 shell、Git 快照/回退、会话保存、mock 模型 HTTP 请求全部通过；旧运行时成功替换为新 APK 的内容。
 - **界面验证受阻**：当前云环境无 KVM，软件模拟器 35.2.10 与 37.3.6 的 WebView 83 均将 `NaN | 0` 错算为 `2147483647`，导致终端初始化异常。上述 Android 原生测试通过调试入口启动运行时，不能据此宣称正常首启已通过。尚无 arm64 真机、中文输入法、多会话界面或真实模型 API 的验收结果。
+
+2026-11-04：在同一 Android 运行时中验证了证书适配修复。旧入口没有 CA 配置，新入口加载打包证书；不可信证书被拒绝，Anthropic HTTPS 流式响应及 OpenAI HTTPS 响应通过。本次使用本地 TLS 测试服务，未使用真实供应商 API key。
 
 ## 当前边界
 

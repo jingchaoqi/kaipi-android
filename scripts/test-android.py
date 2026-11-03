@@ -4,10 +4,12 @@ import argparse
 from pathlib import Path
 import shlex
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--adb", default="adb")
+parser.add_argument("--entry", type=Path, help="Test a replacement Android entry before rebuilding the APK")
 args = parser.parse_args()
 
 
@@ -25,9 +27,23 @@ if subprocess.run([args.adb, "shell", "run-as", app, "test", "-f", "files/runtim
     raise SystemExit("Open the app and wait for runtime initialization before running this test.")
 command = shlex.join(["run-as", app, "sh", "-c", "cat > files/android_smoke.py"])
 adb("shell", command, input=(ROOT / "tests/android_smoke.py").read_bytes())
+with tempfile.TemporaryDirectory() as temporary:
+    fixture = Path(temporary)
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+                    "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+                    "-addext", "basicConstraints=critical,CA:TRUE",
+                    "-addext", "keyUsage=critical,keyCertSign,digitalSignature,keyEncipherment",
+                    "-keyout", str(fixture / "key.pem"), "-out", str(fixture / "cert.pem")],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    for name in ["key.pem", "cert.pem"]:
+        adb("shell", shlex.join(["run-as", app, "sh", "-c", "cat > files/tls-" + name]), input=(fixture / name).read_bytes())
+entry = runtime + "/main.py"
+if args.entry:
+    adb("shell", shlex.join(["run-as", app, "sh", "-c", "cat > files/test-entry.py"]), input=args.entry.read_bytes())
+    entry = data + "/files/test-entry.py"
 environment = ["HOME=" + data + "/files/home", "TMPDIR=" + data + "/files/home/tmp",
                "PYTHONHOME=" + runtime + "/python", "PYTHONPATH=" + runtime, "LD_LIBRARY_PATH=" + libraries,
-               "PATH=" + data + "/files/home/bin:/system/bin"]
+               "PATH=" + data + "/files/home/bin:/system/bin", "KAIPI_TEST_ENTRY=" + entry]
 # Android's env treats APK paths containing '=' as assignments; use the shell's export/exec.
 script = shlex.join(["export", *environment]) + "\n" + shlex.join(["exec", libraries + "/libkaipi_python.so", data + "/files/android_smoke.py"])
 subprocess.run([args.adb, "shell", shlex.join(["run-as", app, "sh", "-c", script])], check=True)
