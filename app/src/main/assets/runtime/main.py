@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kaipi.cli import app
 
 if __name__ == "__main__":
+    from android_tui import install
+
+    install()
     if not any(Path.cwd().iterdir()):
         subprocess.run(["git", "init", "--template=", "-q"], check=True)
     app(args=["-c"], prog_name="kaipi")

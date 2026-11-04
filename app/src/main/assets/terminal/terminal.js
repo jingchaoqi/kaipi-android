@@ -5,8 +5,10 @@ const terminal = new Terminal({cursorBlink:true, fontSize:14, fontFamily:'monosp
 const fit = new FitAddon.FitAddon();
 terminal.loadAddon(fit);
 terminal.open(document.getElementById('terminal'));
+const touch = KaipiTouch.install(terminal);
 let ctrl = false;
 terminal.onData(data => {
+  touch.stop();
   if (ctrl) { data = KaipiKeys.controlInput(data); ctrl = false; Native.ctrlReleased(); }
   Native.send(data);
 });
@@ -22,7 +24,7 @@ window.kaipi = {
   key(key) {terminal.input(KaipiKeys.encodeKey(key, terminal.modes.applicationCursorKeysMode), true); terminal.focus();},
   ctrl(active) {ctrl = active; terminal.focus();},
   focus() {terminal.focus();},
-  reset() {terminal.reset(); fitTerminal(); Native.resize(terminal.cols, terminal.rows);},
+  reset() {touch.stop(); terminal.reset(); fitTerminal(); Native.resize(terminal.cols, terminal.rows);},
   ready() {fitTerminal(); Native.resize(terminal.cols, terminal.rows);}
 };
 fitTerminal();

@@ -67,7 +67,9 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run assets
-          node tests/keys.test.mjs
+          npm test
+          python3 -m pip install 'prompt-toolkit==3.0.53'
+          python3 tests/test_android_tui.py
           sh scripts/test-native.sh
 
       - name: Build Android runtime
