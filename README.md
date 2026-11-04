@@ -10,6 +10,8 @@
 
 顶部名称打开会话列表，`+` 新建，`⋮` 重命名、重启或关闭。切换保留进程和终端内容，各会话的 Ctrl 状态独立。键盘上方一排可横向滚动的按钮提供方向键、`/`、Tab、Esc、Ctrl、Ctrl-C、Enter。
 
+Android 输入区紧跟回答，键盘收起后扩大的区域留在输入区下方，避免回答与输入框之间出现大段空行。这项布局适配位于 `runtime/android_tui.py`，不修改打包的 kaipi 文件；保留原版输入、补全和状态栏。终端支持慢速拖动和松手后的惯性滚动，再次触摸、输入或调整窗口尺寸会停止惯性。
+
 每个终端使用独立私有工作目录，共享 HOME 中的模型配置。空工作目录自动初始化 Git，供 kaipi 快照/回退使用。会话列表和选中项会保存；重新启动通过原版 `-c` 继续该目录最近的会话。关闭终端保留磁盘文件，终端滚屏不持久化。没有后台保活服务，Android 结束 App 后需要重启进程。
 
 ## 更新核心
@@ -52,14 +54,16 @@ APK：`app/build/outputs/apk/debug/app-debug.apk`。
 ## 验证
 
 ```sh
-node tests/keys.test.mjs
+npm test
+python3 -m pip install 'prompt-toolkit==3.0.53'
+python3 tests/test_android_tui.py
 sh scripts/test-native.sh
 python3 tests/test_runtime_package.py
 # 安装并打开调试 APK，等待运行时初始化；连接 adb 后：
 python3 scripts/test-android.py  # 主机需 openssl，自动生成临时 TLS 测试证书
 ```
 
-快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存，以及 OpenAI/Anthropic 协议的 HTTPS 请求与流式响应；同时验证不可信证书会被拒绝。模型端点是本地 mock，不能代替真实 API 与交互测试。
+快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode；触摸测试覆盖小幅拖动累计、惯性、反向滑动、边界及取消。布局测试使用真实 prompt-toolkit 容器，检查紧凑布局和重复安装。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存，以及 OpenAI/Anthropic 协议的 HTTPS 请求与流式响应；同时验证不可信证书会被拒绝。模型端点是本地 mock，不能代替真实 API 与交互测试。
 
 Android 入口通过 `SSL_CERT_FILE` 指向随 APK 打包的 certifi CA，保留显式配置的证书路径。独立 CPython 没有可用的 OpenSSL 系统证书目录；不配置时，Anthropic SDK 的 httpx2 会在 HTTPS 握手失败后显示 `APIConnectionError: Connection error`。价格表来自本地文件，其显示不能证明 API 连通。
 
@@ -72,6 +76,8 @@ Android 入口通过 `SSL_CERT_FILE` 指向随 APK 打包的 certifi CA，保留
 - **界面验证受阻**：当前云环境无 KVM，软件模拟器 35.2.10 与 37.3.6 的 WebView 83 均将 `NaN | 0` 错算为 `2147483647`，导致终端初始化异常。上述 Android 原生测试通过调试入口启动运行时，不能据此宣称正常首启已通过。尚无 arm64 真机、中文输入法、多会话界面或真实模型 API 的验收结果。
 
 2026-11-04：在同一 Android 运行时中验证了证书适配修复。旧入口没有 CA 配置，新入口加载打包证书；不可信证书被拒绝，Anthropic HTTPS 流式响应及 OpenAI HTTPS 响应通过。本次使用本地 TLS 测试服务，未使用真实供应商 API key。
+
+2026-11-04 键盘与滚动修复：在桌面 Chromium 移动视口中连接真实 PTY 和打包的 kaipi 输入区，验证回答后反复切换 390/720 像素高度，回答与输入区间未新增空行；触摸事件验证慢速拖动、惯性和反向滚动，包含 5000 行历史及非整数像素密度。双架构 APK 构建及 lint 通过（0 errors、4 个原有 warnings）。这些验证不包含 Android 真机中文输入法验收。
 
 ## 当前边界
 
