@@ -1,0 +1,108 @@
+name: Publish verified APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful master Build APK run ID to publish
+        required: true
+        type: string
+      tag:
+        description: Existing draft release tag
+        required: true
+        default: v0.2.0
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate the selected build and draft
+        id: source
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          def gh(*args):
+              return json.loads(subprocess.check_output(['gh', *args], text=True))
+          run_id, tag = os.environ['SOURCE_RUN_ID'], os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'[0-9]+', run_id), 'Invalid run ID'
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag), 'Invalid version tag'
+          run = gh('api', f"repos/{os.environ['GH_REPO']}/actions/runs/{run_id}")
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Build has not succeeded'
+          assert run['head_branch'] == 'master' and run['event'] == 'push', 'Select a master push build'
+          assert run['path'] == '.github/workflows/build-apk.yml', 'Select the Build APK workflow'
+          release = gh('release', 'view', tag, '--json', 'isDraft,targetCommitish')
+          assert release['isDraft'], 'Only an unpublished draft can be released'
+          assert release['targetCommitish'] == run['head_sha'], 'Draft and APK source commits differ'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f"sha={run['head_sha']}\nartifact=kaipi-android-debug-{run['run_number']}\n")
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+
+      - name: Download the selected Actions artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: Verify and prepare original APK and corresponding Git source
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          cd ..
+          mkdir -p app/build/outputs/apk/debug
+          cp dist/kaipi-android-debug.apk app/build/outputs/apk/debug/app-debug.apk
+          python3 tests/test_runtime_package.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, re, shutil, subprocess, urllib.request
+          apk = Path('dist/kaipi-android-debug.apk')
+          aapt = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0/aapt'
+          badging = subprocess.check_output([str(aapt), 'dump', 'badging', str(apk)], text=True)
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
+          assert package and package[1] == 'dev.kaipi.android', 'Unexpected application ID'
+          version = os.environ['RELEASE_TAG'][1:]
+          assert package[3] == version, 'APK version does not match release tag'
+          out = Path('release-assets'); out.mkdir()
+          target = out / f'kaipi-android-{version}.apk'
+          shutil.copyfile(apk, target)
+          assert hashlib.sha256(target.read_bytes()).digest() == hashlib.sha256(apk.read_bytes()).digest()
+          lock = json.loads(Path('scripts/runtime.lock.json').read_text())
+          source = out / f"git-{lock['git']}.tar.xz"
+          with urllib.request.urlopen(f'https://www.kernel.org/pub/software/scm/git/{source.name}', timeout=120) as response:
+              source.write_bytes(response.read())
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == lock['git_sha256'], 'Git source checksum mismatch'
+          (out / 'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in [target, source]))
+          PY
+
+      - name: Upload verified assets and publish the draft
+        run: |
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
