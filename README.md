@@ -82,19 +82,28 @@
 
 ## 模型由你选择
 
-支持 Anthropic、OpenAI Responses、OpenAI Chat 与 Gemini 协议，
-可接入 DeepSeek、Kimi、GLM、OpenRouter、Ollama 等服务，或填写兼容端点。
+| 供应商 | 支持的协议 |
+| --- | --- |
+| Anthropic | Anthropic Messages |
+| OpenAI | OpenAI Responses |
+| Google Gemini | Gemini |
+| DeepSeek | OpenAI Chat Completions、Anthropic Messages |
+| Kimi（国际） | OpenAI Chat Completions、Anthropic Messages |
+| Kimi（国内） | OpenAI Chat Completions、Anthropic Messages |
+| GLM / Z.ai（国际） | OpenAI Chat Completions、Anthropic Messages |
+| GLM / 智谱（国内） | OpenAI Chat Completions、Anthropic Messages |
+| OpenCode Zen | OpenAI Chat Completions、Anthropic Messages |
+| OpenCode Go | OpenAI Chat Completions、Anthropic Messages |
+| Qwen / 通义千问 | OpenAI Chat Completions |
+| OpenRouter | OpenAI Chat Completions |
+| Groq | OpenAI Chat Completions |
+| Ollama | OpenAI Chat Completions |
+
+也可以修改服务地址，接入使用对应协议的兼容端点。
 界面中可以切换模型，预览并更新模型与价格目录。
 
 API key 保存在应用私有目录，不写入对话或工作区。
 模型请求发送到你选择的供应商，对话历史和文件保留在设备上。
-
-## 当前边界
-
-- 图片和 Office 附件的部分原生依赖尚未移植；不支持的文件会在发送前提示。
-- 应用没有后台保活服务。系统结束进程后，已保存的会话可恢复，进行中的回合无法保证继续。
-- 本地 Git 支持快照与回退；联网 clone/fetch 的完整依赖、应用内在线升级仍待完善。
-- arm64 真机、不同中文输入法与无障碍服务仍需持续验收。
 
 构建方式、架构、测试与 core 更新说明见 [开发文档](docs/DEVELOPMENT.md)。
 
