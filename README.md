@@ -9,13 +9,14 @@
 <p align="center"><strong>在手机上，让思路长成一棵树。</strong><br><sub>A thoughtful Android home for kaipi.</sub></p>
 
 <p align="center">
+  <a href="https://github.com/jingchaoqi/kaipi-android/releases/latest"><img src="https://img.shields.io/github/v/release/jingchaoqi/kaipi-android?style=flat-square&color=627D6D" alt="Latest release"></a>
   <a href="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml"><img src="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml/badge.svg" alt="Build APK"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-627D6D?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/中文_%2F_English-365D47?style=flat-square" alt="中文 / English">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-627D6D?style=flat-square" alt="MIT License"></a>
 </p>
 
-<p align="center"><a href="#安装">下载安装</a> · <a href="#让上下文可见">树形上下文</a> · <a href="#为手机而设计">界面与体验</a> · <a href="docs/DEVELOPMENT.md">开发文档</a></p>
+<p align="center"><a href="https://github.com/jingchaoqi/kaipi-android/releases/latest">下载安装</a> · <a href="#让上下文可见">树形上下文</a> · <a href="#为手机而设计">界面与体验</a> · <a href="docs/DEVELOPMENT.md">开发文档</a></p>
 
 [kaipi（开辟）](https://github.com/jingchaoqi/kaipi) 的 Android GUI。
 在对话中阅读代码、编写文件、执行命令；在上下文树上整理思路，
@@ -75,8 +76,8 @@
 需要 **Android 8.0 或更高版本**，建议更新 Android System WebView。
 一个 APK 同时支持 arm64-v8a 与 x86_64。
 
-1. 打开 [Build APK](https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml)，选择最新一次成功构建。
-2. 在 **Artifacts** 下载 `kaipi-android-debug-…`，解压并安装 APK。压缩包同时提供 `SHA256SUMS`。
+1. 前往 [最新 Release](https://github.com/jingchaoqi/kaipi-android/releases/latest)，此入口会自动指向最新发布的版本。
+2. 在 **Assets** 下载 `.apk` 文件并直接安装；可使用同页的 `SHA256SUMS` 校验文件。
 3. 打开应用，选择语言，填写模型服务地址、API key 与模型 ID。也可以先进入界面，再配置模型。
 
 当前为开发预览版。第 4 次 Actions 构建起沿用固定开发签名，可以覆盖升级，保留已有数据。
