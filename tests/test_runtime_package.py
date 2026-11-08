@@ -5,6 +5,9 @@ import base64
 import csv
 import io
 import ast
+import os
+import re
+import subprocess
 import unittest
 import zipfile
 
@@ -21,6 +24,15 @@ class RuntimePackageTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.apk.close()
+
+    def test_signing_certificate_matches_previous_actions_builds(self):
+        sdk = Path(os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT') or Path.home() / 'Android/Sdk')
+        signer = sdk / 'build-tools/35.0.0/apksigner'
+        result = subprocess.run([str(signer), 'verify', '--print-certs', str(APK)],
+                                check=True, capture_output=True, text=True)
+        fingerprints = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$', result.stdout, re.MULTILINE)
+        self.assertEqual(fingerprints, ['1cfa8d84d9e502f1c7dc9db65c8bf080d350362510a8af5e16af6d9747b36283'],
+                         'APK signing certificate changed; existing installs must remain upgradeable.')
 
     def test_gui_entry_and_assets_replace_the_terminal(self):
         for name in ['index.html', 'app.js', 'model.js', 'theme.js', 'style.css', 'render.js', 'locale.js', 'kaipi-logo.svg', 'kaipi-logo-dark.svg', 'vendor/marked.js']:

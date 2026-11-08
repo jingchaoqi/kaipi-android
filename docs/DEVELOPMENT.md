@@ -45,6 +45,10 @@ APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.0，包名与�
 
 版本策略：仅在用户明确指定时修改 `versionName` 和 `versionCode`。日常修改、提交与 Actions 构建均保持当前版本；Actions 的运行编号仅用于区分下载产物，不作为应用版本号。
 
+签名策略：沿用仓库中的固定开发密钥，不在 Actions 或发布时生成、替换密钥，也不对产物重新签名。
+证书 SHA-256 为 `1cfa8d84d9e502f1c7dc9db65c8bf080d350362510a8af5e16af6d9747b36283`，与第 4 次 Actions 起的构建保持一致。
+CI 的 APK 检查会验证签名并比对该指纹，发现变化即失败；GitHub Release 使用通过检查的 Actions 原始 APK。
+
 更新 core：
 
 ```sh
