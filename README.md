@@ -1,91 +1,106 @@
-# kaipi Android
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kaipi-logo-dark.svg">
+    <img src="docs/assets/kaipi-logo.svg" alt="kaipi" width="64" height="64" align="absmiddle">
+  </picture>
+  &nbsp;kaipi for Android
+</h1>
 
-一个 APK，打开就是原版 kaipi TUI。Android 层只提供 Python 运行时、终端和输入法上方的快捷键，不依赖 Termux 或远程主机，暂不适配 canvas。
+<p align="center"><strong>在手机上，让思路长成一棵树。</strong><br><sub>A thoughtful Android home for kaipi.</sub></p>
 
-**开发预览版，尚未完成正常首启和界面验收。** 已原样引入 kaipi 0.1.3（提交见 `vendor/kaipi/REVISION`），内置 Android CPython 3.13、TUI 依赖及本地 Git。构建目标为 Android 8.0+，arm64-v8a / x86_64，需要较新的系统 WebView。当前只提供调试构建；缺少的图片、Office 原生依赖会阻止完整 release 构建。
+<p align="center">
+  <a href="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml"><img src="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml/badge.svg" alt="Build APK"></a>
+  <img src="https://img.shields.io/badge/Android-8.0%2B-627D6D?style=flat-square" alt="Android 8.0+">
+  <img src="https://img.shields.io/badge/中文_%2F_English-365D47?style=flat-square" alt="中文 / English">
+</p>
 
-## 使用与会话
+<p align="center"><a href="#安装">下载安装</a> · <a href="#让上下文可见">树形上下文</a> · <a href="#为手机而设计">界面与体验</a> · <a href="docs/DEVELOPMENT.md">开发文档</a></p>
 
-首次启动安装 APK 内置运行时，然后进入 kaipi 自己的模型配置流程。模型服务和 API key 仍由用户配置；API key 不包含在 APK 中。
+[kaipi（开辟）](https://github.com/jingchaoqi/kaipi) 的 Android GUI。
+在对话中阅读代码、编写文件、执行命令；在上下文树上整理思路，
+从任意节点开启探索，再把有价值的发现带回主干。
 
-顶部名称打开会话列表，`+` 新建，`⋮` 重命名、重启或关闭。切换保留进程和终端内容，各会话的 Ctrl 状态独立。键盘上方一排可横向滚动的按钮提供方向键、`/`、Tab、Esc、Ctrl、Ctrl-C、Enter。
+一个 APK，内置 Python、Git 和 kaipi core。打开就能使用自己的模型服务，
+无需 Termux、电脑或远程主机。
 
-Android 输入区紧跟回答，键盘收起后扩大的区域留在输入区下方，避免回答与输入框之间出现大段空行。这项布局适配位于 `runtime/android_tui.py`，不修改打包的 kaipi 文件；保留原版输入、补全和状态栏。终端支持慢速拖动和松手后的惯性滚动，再次触摸、输入或调整窗口尺寸会停止惯性。
+<p align="center">
+  <img src="docs/screenshots/conversation.png" alt="手机对话界面" width="245">
+  &nbsp;
+  <img src="docs/screenshots/context-tree.png" alt="树形上下文与节点操作" width="245">
+  &nbsp;
+  <img src="docs/screenshots/provider-picker.png" alt="自绘供应商选择器" width="245">
+</p>
 
-每个终端使用独立私有工作目录，共享 HOME 中的模型配置。空工作目录自动初始化 Git，供 kaipi 快照/回退使用。会话列表和选中项会保存；重新启动通过原版 `-c` 继续该目录最近的会话。关闭终端保留磁盘文件，终端滚屏不持久化。没有后台保活服务，Android 结束 App 后需要重启进程。
+## 让上下文可见
 
-## 更新核心
+每轮对话都是一个节点。主干保留当前方向，分支容纳调查、比较和尝试。
 
-```sh
-python3 scripts/update-core.py           # 最新 master
-python3 scripts/update-core.py v0.1.3    # 指定上游 ref
-```
+- **从这里继续，或换个方向探索。** 点选历史节点即可调整下一轮上下文。
+- **把发现带回来。** 按需嫁接单轮问答、问答与路径摘要，或整条分支。
+- **为思路减负。** 归档暂时不需要的分支，随时恢复；明确选择哪些内容进入后续对话。
+- **回到合适的位置。** 分别回退对话、代码，或两者一起回退，并先查看受影响的文件。
 
-脚本使用 uv 构建上游 wheel，原样引入 `kaipi/` 和版本元数据，记录提交、许可证、依赖声明及锁文件。不要直接改 `app/src/main/assets/runtime/kaipi/`；Android 入口 `main.py` 在其外部。
+树支持平移、缩放、折叠、定位当前位置；节点详情集中在底部，单手也能完成操作。
+主干、探索分支和当前节点各有清楚的标记，用量与费用随对话可见。
 
-更新后重新运行 runtime 构建和验证，再生成 APK。安装新版 APK 时，根据内置运行时内容摘要刷新代码和依赖，保留 HOME 与工作目录。依赖引入新的原生库时，需要继续适配 Android。
+## 为手机而设计
 
-**原生 `/update` 尚未支持。** 上游要求 `uv tool` 安装收据和可执行入口；当前 APK 不具备这一安装布局。目标是让纯 Python 核心独立更新，仍需完成 uv/入口/依赖兼容方案。Python ABI、原生库或 Android 权限发生变化时，仍可能需要新版 APK。
+**从第一次打开开始。** 双语欢迎页先选择简体中文或 English，再引导连接供应商。
+模型配置可以稍后完成，首次对话前会再次提醒。
 
-## 构建
+**界面有统一的节奏。** 对话、代码、工具输出和节点操作各有自己的位置。
+供应商、模型、语言、主题与工作区使用统一的应用内选择面板。
+引擎状态安静地留在输入框上方，加载完成也不会推移页面。
 
-Linux 构建机需要 Python 3.11+、uv、Rust 1.90（rustup）、Node.js、JDK 17+；Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973 和 CMake 3.22.1。设置 `ANDROID_HOME`、`JAVA_HOME`。
+**按你的习惯阅读。** 跟随系统、浅色、深色，搭配松绿、靛蓝或陶土。
+切换即时生效，状态栏同步；动效尊重系统的「减少动态效果」。
 
-```sh
-npm ci --ignore-scripts
-npm run assets
-rustup toolchain install 1.90.0 --profile minimal
-python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
-./gradlew :app:assembleDebug
-```
+**离开后，接着聊。** 会话、工作区和模型配置保存在本机，文本草稿跨重启保留。
+手机用侧栏与独立上下文面板；平板空间足够时，可以同时展开对话与树。
 
-运行时构建自动下载并校验 CPython Android 包、上游锁定依赖和 Git 源码；用 NDK 编译 Python 入口、本地 Git、pydantic-core、jiter。默认缓存 `.tools/runtime`，可用 `--cache` 指定位置。首次构建需要联网，耗时明显长于 APK 编译。生成的库和依赖不提交到仓库。
+<details>
+<summary>看看首次引导与深色界面</summary>
+<p align="center">
+  <img src="docs/screenshots/language.png" alt="不可跳过的双语语言选择" width="245">
+  &nbsp;
+  <img src="docs/screenshots/provider-setup.png" alt="可稍后完成的供应商引导" width="245">
+  &nbsp;
+  <img src="docs/screenshots/dark.png" alt="深色界面" width="245">
+</p>
+</details>
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。
+## 安装
 
-## GitHub Actions 自动编译
+需要 **Android 8.0 或更高版本**，建议更新 Android System WebView。
+一个 APK 同时支持 arm64-v8a 与 x86_64。
 
-[Build APK](.github/workflows/build-apk.yml) 在推送到 `master`、提交 PR 时自动执行，也可在 GitHub 的 **Actions → Build APK → Run workflow** 手动触发。
+1. 打开 [Build APK](https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml)，选择最新一次成功构建。
+2. 在 **Artifacts** 下载 `kaipi-android-debug-…`，解压并安装 APK。压缩包同时提供 `SHA256SUMS`。
+3. 打开应用，选择语言，填写模型服务地址、API key 与模型 ID。也可以先进入界面，再配置模型。
 
-工作流安装固定版本的构建工具，编译仓库中已锁定的 kaipi 核心及 Android 原生依赖，运行快捷键、主机 PTY、APK 完整性测试和 Android lint。原生构建与 Gradle/npm 依赖使用缓存；首次运行需要完整编译。CI 不运行 Android 交互验收。
+当前为开发预览版。第 4 次 Actions 构建起沿用固定开发签名，可以覆盖升级，保留已有数据。
+更早的临时签名版需要先备份，再迁移安装；卸载会清除应用数据。
 
-成功后，在该次运行的 **Artifacts** 中下载 `kaipi-android-debug-<运行编号>`，解压得到 `kaipi-android-debug.apk` 和 `SHA256SUMS`。一个 APK 同时包含 arm64-v8a 和 x86_64。预览版使用仓库内公开的 `app/debug.keystore`，让后续 CI 构建可覆盖安装；此开发密钥不能用于正式发行。最初的第 3 次构建使用临时签名，升级到固定签名需要先备份数据并卸载旧包。构建报告另存为 `build-reports-<运行编号>`，产物保留 14 天。此流程只上传 Actions 构建产物，不创建 GitHub Release。
+## 模型由你选择
 
-## 验证
+支持 Anthropic、OpenAI Responses、OpenAI Chat 与 Gemini 协议，
+可接入 DeepSeek、Kimi、GLM、OpenRouter、Ollama 等服务，或填写兼容端点。
+界面中可以切换模型，预览并更新模型与价格目录。
 
-```sh
-npm test
-python3 -m pip install 'prompt-toolkit==3.0.53'
-python3 tests/test_android_tui.py
-sh scripts/test-native.sh
-python3 tests/test_runtime_package.py
-# 安装并打开调试 APK，等待运行时初始化；连接 adb 后：
-python3 scripts/test-android.py  # 主机需 openssl，自动生成临时 TLS 测试证书
-```
-
-快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode；触摸测试覆盖小幅拖动累计、惯性、反向滑动、边界及取消。布局测试使用真实 prompt-toolkit 容器，检查紧凑布局和重复安装。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存，以及 OpenAI/Anthropic 协议的 HTTPS 请求与流式响应；同时验证不可信证书会被拒绝。模型端点是本地 mock，不能代替真实 API 与交互测试。
-
-Android 入口通过 `SSL_CERT_FILE` 指向随 APK 打包的 certifi CA，保留显式配置的证书路径。独立 CPython 没有可用的 OpenSSL 系统证书目录；不配置时，Anthropic SDK 的 httpx2 会在 HTTPS 握手失败后显示 `APIConnectionError: Connection error`。价格表来自本地文件，其显示不能证明 API 连通。
-
-2026-11-03 验证结果：
-
-- 双架构 debug APK 构建成功，约 40 MB；25 个上游核心文件逐文件校验一致。
-- 3 项快捷键测试、主机 PTY 集成测试、3 项 APK 完整性/ABI/版本摘要测试通过。
-- Android lint：0 errors、4 warnings（JavaScript、备份规则、图标和国际化提示）。
-- Android 11 x86_64 模拟器中，CPython/原生模块/kaipi 导入、本地 shell、Git 快照/回退、会话保存、mock 模型 HTTP 请求全部通过；旧运行时成功替换为新 APK 的内容。
-- **界面验证受阻**：当前云环境无 KVM，软件模拟器 35.2.10 与 37.3.6 的 WebView 83 均将 `NaN | 0` 错算为 `2147483647`，导致终端初始化异常。上述 Android 原生测试通过调试入口启动运行时，不能据此宣称正常首启已通过。尚无 arm64 真机、中文输入法、多会话界面或真实模型 API 的验收结果。
-
-2026-11-04：在同一 Android 运行时中验证了证书适配修复。旧入口没有 CA 配置，新入口加载打包证书；不可信证书被拒绝，Anthropic HTTPS 流式响应及 OpenAI HTTPS 响应通过。本次使用本地 TLS 测试服务，未使用真实供应商 API key。
-
-2026-11-04 键盘与滚动修复：在桌面 Chromium 移动视口中连接真实 PTY 和打包的 kaipi 输入区，验证回答后反复切换 390/720 像素高度，回答与输入区间未新增空行；触摸事件验证慢速拖动、惯性和反向滚动，包含 5000 行历史及非整数像素密度。双架构 APK 构建及 lint 通过（0 errors、4 个原有 warnings）。这些验证不包含 Android 真机中文输入法验收。
+API key 保存在应用私有目录，不写入对话或工作区。
+模型请求发送到你选择的供应商，对话历史和文件保留在设备上。
 
 ## 当前边界
 
-- 不改写上游核心、TUI、模型配置或 `.kaipi` 格式。
-- 本地 Git 支持快照/回退；暂不包含 HTTP/SSH clone/fetch 的运行依赖。
-- 图片/Office 处理的 lxml、numpy、onnxruntime、pandas、pillow、pillow-heif 尚未移植；相关功能不可用。
-- 尚未接入 Android 文件选择、剪贴板附件、后台服务或 APK 内在线升级。
-- 原生库从 APK 的 `nativeLibraryDir` 执行；HOME、TMPDIR、Python 包和工作目录位于 App 私有目录。
-- 中文输入法、旋转、多会话切换以及真实模型调用仍需 Android 交互验收。
+- 图片和 Office 附件的部分原生依赖尚未移植；不支持的文件会在发送前提示。
+- 应用没有后台保活服务。系统结束进程后，已保存的会话可恢复，进行中的回合无法保证继续。
+- 本地 Git 支持快照与回退；联网 clone/fetch 的完整依赖、应用内在线升级仍待完善。
+- arm64 真机、不同中文输入法与无障碍服务仍需持续验收。
 
-许可证位于 `vendor/kaipi/LICENSE` 和 `app/src/main/assets/licenses/`。CPython Android 二进制来自 Chaquopy Maven 包；Git 使用 GPLv2，精确源码版本、下载地址与构建选项见 `scripts/runtime.lock.json` 和 `scripts/build-runtime.py`。发布 APK 时需同时履行所含依赖的许可证及对应源码提供义务。
+构建方式、架构、测试与 core 更新说明见 [开发文档](docs/DEVELOPMENT.md)。
+
+---
+
+Android 层直接使用上游 kaipi core，独立实现界面。
+[kaipi](https://github.com/jingchaoqi/kaipi) 为 MIT；Git 与其他内置组件按各自许可证分发。
+详细版本、许可证和源码要求见 [开发文档](docs/DEVELOPMENT.md#许可证与分发)。

@@ -107,7 +107,7 @@ run("uv", "pip", "install", "--python", CACHE / "build-env/bin/python", "maturin
 for target in ABIS.values():
     run("rustup", "target", "add", "--toolchain", "1.90.0", target)
 
-# Only the TUI's native extensions are currently ported. Attachment libraries remain explicit.
+# Only core request/validation native extensions are currently ported. Attachment libraries remain explicit.
 for name in ["pydantic-core", "jiter"]:
     package = by_name[name]
     source = package["sdist"]
@@ -167,4 +167,4 @@ copy(CACHE / "stdlib", python)
 copy(CACHE / "site-packages", python / "site-packages")
 missing = sorted(set(native) - {"pydantic-core", "jiter"})
 (ASSETS / "runtime-status.json").write_text(json.dumps({"python": LOCK["python"], "unavailableNative": missing}, indent=2) + "\n")
-print("Built TUI runtime. Attachment native dependencies not yet ported:", ", ".join(missing))
+print("Built core runtime. Attachment native dependencies not yet ported:", ", ".join(missing))

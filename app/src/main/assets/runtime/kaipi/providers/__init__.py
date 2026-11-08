@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, Field
 
+from kaipi.i18n import tr
 from kaipi.model import Message, Usage
 
 BASH_TOOL_DESCRIPTION = (
@@ -177,6 +179,15 @@ def parse_models(listed: str) -> list[str]:
     return [m for m in re.split(r"[,\uff0c\s]+", listed) if m]
 
 
+def remove_auth(name: str) -> Path:
+    data = auth()
+    data.get("providers", {}).pop(name, None)
+    if data.get("provider") == name or str(data.get("model", "")).startswith(name + "/"):
+        data.pop("model", None)
+        data.pop("provider", None)
+    return _write(data)
+
+
 def use_model(provider: str, model: str) -> Path:
     """Activate one model, always as `<provider>/<id>`. The provider is the one the user
     listed the model under in `/provider`, with the endpoint and key they gave it; a price
@@ -199,10 +210,14 @@ def _write(data: dict[str, Any]) -> Path:
         body += [""]
     # It holds credentials: 600 before a byte is written, not after - write-then-chmod
     # leaves the key world-readable for a moment under the usual 022 umask.
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    p.chmod(0o600)  # O_CREAT's mode does not apply to a file that already existed
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("\n".join(body))
+    fd, temporary = tempfile.mkstemp(dir=p.parent)  # mode 600 from creation
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(body))
+        os.replace(temporary, p)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     return p
 
 
@@ -255,13 +270,15 @@ def build(
     if name is None:
         name, _, model = spec.partition("/")
         if not model:
-            raise ValueError(f"{spec}: not in pricing.toml; use <provider>/<model>")
+            raise ValueError(tr("{spec} 不在价格表中，请使用 <provider>/<model>", spec=spec))
     elif model.startswith(f"{name}/"):  # a pricing entry keyed as <provider>/<model id>
         model = model[len(name) + 1 :]
     known = {**BUILTIN, **providers}
     cfg = known.get(name)
     if cfg is None:
-        raise ValueError(f"unknown provider {name!r}; known: {', '.join(known)}")
+        raise ValueError(
+            tr("未知提供商 {name}；可选：{known}", name=repr(name), known=", ".join(known))
+        )
     # Precedence: the environment (a deliberate one-off), then `/provider`'s file, then
     # the preset. So an export still overrides a saved key without having to unsave it.
     saved: dict[str, str] = auth().get("providers", {}).get(name, {})
@@ -277,8 +294,11 @@ def build(
     if cfg.needs_key and cfg.api_key_env and not key:
         # A sentence the user can act on, rather than a 401 from the vendor five seconds later.
         raise ValueError(
-            f"{name} 还没有 API key。运行 `kaipi provider` 配置一次，"
-            f"或者 export {cfg.api_key_env}=..."
+            tr(
+                "{name} 还没有 API key。运行 kaipi provider 配置，或者 export {env}=...",
+                name=name,
+                env=cfg.api_key_env,
+            )
         )
     if cfg.api == "anthropic":
         from kaipi.providers.anthropic import AnthropicProvider

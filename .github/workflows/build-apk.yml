@@ -62,15 +62,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/build-apk.yml', 'scripts/build-runtime.py', 'scripts/runtime.lock.json', 'vendor/kaipi/uv.lock', 'app/src/main/cpp/python.c') }}
+          restore-keys: |
+            runtime-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build terminal assets and run host tests
+      - name: Build GUI assets and run host tests
         run: |
           npm ci --ignore-scripts
           npm run assets
           npm test
-          python3 -m pip install 'prompt-toolkit==3.0.53'
-          python3 tests/test_android_tui.py
-          sh scripts/test-native.sh
+          sh scripts/test-host.sh
+          npx playwright install --with-deps chromium
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 
       - name: Build Android runtime
         run: python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"

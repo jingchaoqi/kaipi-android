@@ -1,6 +1,10 @@
 """Inspect the real APK for packaging regressions that source-only tests cannot catch."""
 from pathlib import Path
 import hashlib
+import base64
+import csv
+import io
+import ast
 import unittest
 import zipfile
 
@@ -17,6 +21,34 @@ class RuntimePackageTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.apk.close()
+
+    def test_gui_entry_and_assets_replace_the_terminal(self):
+        for name in ['index.html', 'app.js', 'model.js', 'theme.js', 'style.css', 'render.js', 'locale.js', 'kaipi-logo.svg', 'kaipi-logo-dark.svg', 'vendor/marked.js']:
+            self.assertIn('assets/ui/' + name, self.names)
+        self.assertFalse(any(name.startswith('assets/terminal/') for name in self.names))
+        self.assertNotIn('assets/runtime/android_tui.py', self.names)
+        for name in ['main.py', 'core_bridge.py']:
+            tree = ast.parse(self.apk.read('assets/runtime/' + name).decode())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    self.assertNotIn(node.module, ['kaipi.cli', 'kaipi.tui', 'kaipi.server', 'kaipi.views'])
+                    self.assertFalse(node.module == 'kaipi' and any(alias.name in ['cli', 'tui', 'server', 'views'] for alias in node.names))
+
+    def test_official_brand_assets_are_packaged_unchanged(self):
+        for name in ['kaipi-logo.svg', 'kaipi-logo-dark.svg']:
+            self.assertEqual((ROOT / 'docs/assets' / name).read_bytes(), self.apk.read('assets/ui/' + name))
+
+    def test_vendored_core_matches_the_upstream_wheel_record(self):
+        record = self.apk.read('assets/runtime/kaipi-0.2.0.dist-info/RECORD').decode()
+        count = 0
+        for path, digest, size in csv.reader(io.StringIO(record)):
+            if path.startswith('kaipi/') and digest:
+                data = self.apk.read('assets/runtime/' + path)
+                actual = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
+                self.assertEqual('sha256=' + actual, digest, path)
+                self.assertEqual(len(data), int(size), path)
+                count += 1
+        self.assertGreater(count, 30)
 
     def test_python_assets_are_not_filtered(self):
         assets = ROOT / "app/src/main/assets"

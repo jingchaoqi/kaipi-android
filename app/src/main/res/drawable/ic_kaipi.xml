@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="160" android:viewportHeight="160">
+    <path android:fillColor="#E7EDE0" android:pathData="M30,0h100a30,30 0,0 1,30 30v100a30,30 0,0 1,-30 30h-100a30,30 0,0 1,-30 -30v-100a30,30 0,0 1,30 -30" />
+    <!-- Official kaipi geometry, unchanged inside a padded background tile. -->
+    <group android:translateX="16" android:translateY="16">
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#193B36" android:strokeWidth="10" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M60 108V48M60 82H38A12 12 0 0 1 26 70V53" />
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#58B99C" android:strokeWidth="10" android:strokeLineCap="round" android:pathData="M60 64H88A12 12 0 0 0 100 52V45" />
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#193B36" android:strokeWidth="8" android:pathData="M49 30a11,11 0,1 0,22 0a11,11 0,1 0,-22 0" />
+        <path android:fillColor="#193B36" android:pathData="M18 45a8,8 0,1 0,16 0a8,8 0,1 0,-16 0" />
+        <path android:fillColor="#58B99C" android:pathData="M100 7L104.5 17.5L115 22L104.5 26.5L100 37L95.5 26.5L85 22L95.5 17.5Z" />
+    </group>
+</vector>
