@@ -1,105 +1,106 @@
-# kaipi Android
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kaipi-logo-dark.svg">
+    <img src="docs/assets/kaipi-logo.svg" alt="kaipi" width="64" height="64" align="absmiddle">
+  </picture>
+  &nbsp;kaipi for Android
+</h1>
 
-一个独立的 Android AI 助手。对话、模型配置和树形上下文都有自己的 GUI；通过私有进程管道直接调用内置 kaipi core。Android 界面不导入或启动 CLI、TUI、Canvas，也不发送 slash 命令。
+<p align="center"><strong>在手机上，让思路长成一棵树。</strong><br><sub>A thoughtful Android home for kaipi.</sub></p>
 
-## 界面与操作
+<p align="center">
+  <a href="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml"><img src="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml/badge.svg" alt="Build APK"></a>
+  <img src="https://img.shields.io/badge/Android-8.0%2B-627D6D?style=flat-square" alt="Android 8.0+">
+  <img src="https://img.shields.io/badge/中文_%2F_English-365D47?style=flat-square" alt="中文 / English">
+</p>
 
-- 对话页：Markdown、代码复制、可展开的工具调用、执行进度、停止、文件附件和会话草稿。
-- 上下文树：主干与探索分支用不同颜色区分；支持平移、缩放、适应视图、定位当前位置、折叠子树和显示归档。
-- 节点详情：查看完整内容、从这里继续或探索、设为主干、按三种深度嫁接、移除待嫁接项、归档和恢复分支。回退提供对话、代码和两者三种模式，并显示受影响文件。
-- 会话：新建、搜索、重命名和恢复。切换时保留尚未发送的草稿；后台进程结束后从 core 的日志恢复。
-- 模型：服务商地址、key 和模型列表、模型切换、模型/价格目录预览后保存。key 不回传给 GUI。
-- 外观：跟随系统、浅色、深色；松绿、靛蓝、陶土三种配色。切换即时生效，保存到本地设置，状态栏与导航栏同步。尊重系统减少动态效果设置。
+<p align="center"><a href="#安装">下载安装</a> · <a href="#让上下文可见">树形上下文</a> · <a href="#为手机而设计">界面与体验</a> · <a href="docs/DEVELOPMENT.md">开发文档</a></p>
 
-手机上会话列表是左侧抽屉，上下文树是独立全屏面板，节点操作位于面板下部。所有资源随 APK 提供，无 CDN、网页远程代码或 WebView 对模型端点的直接访问。
+[kaipi（开辟）](https://github.com/jingchaoqi/kaipi) 的 Android GUI。
+在对话中阅读代码、编写文件、执行命令；在上下文树上整理思路，
+从任意节点开启探索，再把有价值的发现带回主干。
 
-## 架构
+一个 APK，内置 Python、Git 和 kaipi core。打开就能使用自己的模型服务，
+无需 Termux、电脑或远程主机。
 
-```text
-Android Activity / 系统文件选择与剪贴板
-    └─ 本地 WebView GUI（ui/）
-        └─ Native.request → LocalCore → CPython 子进程 / 私有 stdin、stdout
-            └─ core_bridge.Application
-                └─ kaipi.core.Session / core.run_input
-                   providers / catalog / settings / attachments
-```
+<p align="center">
+  <img src="docs/screenshots/conversation.png" alt="手机对话界面" width="245">
+  &nbsp;
+  <img src="docs/screenshots/context-tree.png" alt="树形上下文与节点操作" width="245">
+  &nbsp;
+  <img src="docs/screenshots/provider-picker.png" alt="自绘供应商选择器" width="245">
+</p>
 
-`core_bridge.py` 只做请求、结果与事件的数据转换。所有游标移动、嫁接验证、日志写入、快照、回退和并发规则都由上游 core 实现。运行时入口 `main.py` 设置证书与配置目录，初始化空工作区的 Git，再运行桥接。
+## 让上下文可见
 
-协议为 UTF-8 JSONL，请求含 `id/op/body`，响应含 `id/result` 或 `id/error`。回合事件走同一输出管道。回调只入队，不阻塞 core；工作线程退出后再发送 `settled` 快照，避免 GUI 在 core 尚忙时接受下一次操作。stdout 专用于协议，依赖诊断写 stderr，Java 只排空、不展示诊断流。停止和关闭使用 core 的停止机制，Activity 销毁时回收进程。
+每轮对话都是一个节点。主干保留当前方向，分支容纳调查、比较和尝试。
 
-每个工作区使用独立 Python 进程与正确的工作目录；HOME 中共享服务商配置。旧版 `tabs` 中的工作区通过侧栏底部的工作区入口继续访问，`.kaipi` 历史不转换、不重写。原有核心包由上游 wheel 原样引入；Android 适配在包外。
+- **从这里继续，或换个方向探索。** 点选历史节点即可调整下一轮上下文。
+- **把发现带回来。** 按需嫁接单轮问答、问答与路径摘要，或整条分支。
+- **为思路减负。** 归档暂时不需要的分支，随时恢复；明确选择哪些内容进入后续对话。
+- **回到合适的位置。** 分别回退对话、代码，或两者一起回退，并先查看受影响的文件。
 
-## 构建
+树支持平移、缩放、折叠、定位当前位置；节点详情集中在底部，单手也能完成操作。
+主干、探索分支和当前节点各有清楚的标记，用量与费用随对话可见。
 
-需要 Linux、Python 3.11+、uv、Node.js、JDK 17+、Rust 1.90、Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973。构建目标 Android 8.0+，包含 arm64-v8a / x86_64。建议使用最新 Android System WebView。
+## 为手机而设计
 
-```sh
-npm ci --ignore-scripts
-npm run assets
-rustup toolchain install 1.90.0 --profile minimal
-python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
-./gradlew :app:assembleDebug :app:lintDebug
-```
+**从第一次打开开始。** 双语欢迎页先选择简体中文或 English，再引导连接供应商。
+模型配置可以稍后完成，首次对话前会再次提醒。
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.0，包名与开发签名保持兼容，可覆盖旧预览版安装。
+**界面有统一的节奏。** 对话、代码、工具输出和节点操作各有自己的位置。
+供应商、模型、语言、主题与工作区使用统一的应用内选择面板。
+引擎状态安静地留在输入框上方，加载完成也不会推移页面。
 
-更新 core：
+**按你的习惯阅读。** 跟随系统、浅色、深色，搭配松绿、靛蓝或陶土。
+切换即时生效，状态栏同步；动效尊重系统的「减少动态效果」。
 
-```sh
-python3 scripts/update-core.py v0.2.0
-```
+**离开后，接着聊。** 会话、工作区和模型配置保存在本机，文本草稿跨重启保留。
+手机用侧栏与独立上下文面板；平板空间足够时，可以同时展开对话与树。
 
-当前固定上游 `65f4290a48f8244e9588f0716cbf98c306953f35`。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
+<details>
+<summary>看看首次引导与深色界面</summary>
+<p align="center">
+  <img src="docs/screenshots/language.png" alt="不可跳过的双语语言选择" width="245">
+  &nbsp;
+  <img src="docs/screenshots/provider-setup.png" alt="可稍后完成的供应商引导" width="245">
+  &nbsp;
+  <img src="docs/screenshots/dark.png" alt="深色界面" width="245">
+</p>
+</details>
 
-安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内暂不提供 core 在线更新。
+## 安装
 
-## 验证与预览
+需要 **Android 8.0 或更高版本**，建议更新 Android System WebView。
+一个 APK 同时支持 arm64-v8a 与 x86_64。
 
-```sh
-npm test
-sh scripts/test-host.sh
-python3 tests/test_runtime_package.py
-# 在已启动的 APK 中验证 Android CPython、TLS、本地 shell、Git 与会话：
-python3 scripts/test-android.py
-# 完整协议 / 拒绝不可信证书测试（包含 Anthropic SDK）：
-python3 scripts/test-android.py --suite full
-```
+1. 打开 [Build APK](https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml)，选择最新一次成功构建。
+2. 在 **Artifacts** 下载 `kaipi-android-debug-…`，解压并安装 APK。压缩包同时提供 `SHA256SUMS`。
+3. 打开应用，选择语言，填写模型服务地址、API key 与模型 ID。也可以先进入界面，再配置模型。
 
-桥接测试使用真实 core、JSONL、Git 和独立子进程，覆盖树操作、并发停止、模型错误、回退、配置保密、主题持久化与附件验证。APK 测试验证资源、ABI、版本摘要及 GUI 入口。
+当前为开发预览版。第 4 次 Actions 构建起沿用固定开发签名，可以覆盖升级，保留已有数据。
+更早的临时签名版需要先备份，再迁移安装；卸载会清除应用数据。
 
-浏览器交互测试需要 Playwright 的 Chromium，以及安装了 kaipi 依赖的主机 Python：
+## 模型由你选择
 
-```sh
-npx playwright install chromium
-KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
-```
+支持 Anthropic、OpenAI Responses、OpenAI Chat 与 Gemini 协议，
+可接入 DeepSeek、Kimi、GLM、OpenRouter、Ollama 等服务，或填写兼容端点。
+界面中可以切换模型，预览并更新模型与价格目录。
 
-可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
+API key 保存在应用私有目录，不写入对话或工作区。
+模型请求发送到你选择的供应商，对话历史和文件保留在设备上。
 
-开发预览使用隔离的临时工作区与固定测试模型，**只用于开发，不连接真实服务商，不包含在 APK 中**：
+## 当前边界
 
-```sh
-.tools/host-tests/bin/python scripts/preview.py --seed
-```
+- 图片和 Office 附件的部分原生依赖尚未移植；不支持的文件会在发送前提示。
+- 应用没有后台保活服务。系统结束进程后，已保存的会话可恢复，进行中的回合无法保证继续。
+- 本地 Git 支持快照与回退；联网 clone/fetch 的完整依赖、应用内在线升级仍待完善。
+- arm64 真机、不同中文输入法与无障碍服务仍需持续验收。
 
-## 本次验证
+构建方式、架构、测试与 core 更新说明见 [开发文档](docs/DEVELOPMENT.md)。
 
-- 主机：7 项桥接集成测试、3 项树布局测试通过；浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果。
-- 双架构 debug APK 构建、5 项 APK 完整性/ABI/上游 wheel 一致性检查通过；Android lint 为 0 errors、2 warnings。
-- Android 11 x86_64 软件模拟器：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
-- 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
+---
 
-## 当前限制
-
-- 图片、Office 附件的部分原生依赖仍未移植；不支持的文件会在提交前报错，不能视作完整附件支持。
-- Git 支持本地快照/回退，暂不提供 HTTP/SSH clone/fetch 的完整运行依赖。
-- 没有后台保活服务。Android 结束应用后，已落盘历史可恢复，正在执行的回合不能保证继续。
-- 文本草稿可跨重启恢复；附件草稿只在当前应用生命周期内保留。
-- 界面按模型回复更新文本，并非逐 token 输出。停止 bash 可快速生效，等待模型网络请求时可能要到请求返回才结束。
-- 尚需 arm64 真机、不同中文输入法、文件选择器及无障碍服务的交互验收。浏览器检查不能代替这些验收。
-- 预览版使用公开开发签名，不用于正式发行。
-
-CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交互测试、Android lint 和 APK 完整性检查，然后提供调试 APK。模拟器/真机验收单独执行。
-
-许可证：上游 kaipi 为 MIT；CPython 来自 Chaquopy Android 构建，Git 使用 GPLv2。精确版本与源码地址在 `scripts/runtime.lock.json`、`scripts/build-runtime.py` 和 `app/src/main/assets/licenses/`。发布时需履行各依赖的许可证和对应源码提供义务。
+Android 层直接使用上游 kaipi core，独立实现界面。
+[kaipi](https://github.com/jingchaoqi/kaipi) 为 MIT；Git 与其他内置组件按各自许可证分发。
+详细版本、许可证和源码要求见 [开发文档](docs/DEVELOPMENT.md#许可证与分发)。

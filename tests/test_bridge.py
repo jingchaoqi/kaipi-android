@@ -116,6 +116,25 @@ class BridgeTests(unittest.TestCase):
         self.app.dispatch('model', {'provider':'openai','model':'second'})
         self.assertEqual('openai/second', providers.active_model())
         with self.assertRaises(ValueError): self.app.dispatch('model', {'provider':'openai','model':'missing'})
+    def test_language_is_required_before_completing_onboarding(self):
+        with self.assertRaises(ValueError):
+            self.app.dispatch('preferences', {'language':'en','android_onboarding_complete':True})
+        for invalid in ('fr', '', None):
+            with self.assertRaises(ValueError):
+                self.app.dispatch('preferences', {'language':invalid})
+        with self.assertRaises(ValueError):
+            self.app.dispatch('preferences', {'language':'en','android_language_confirmed':'yes'})
+        before = self.app.session.log.path.read_bytes()
+        self.app.session.claim()
+        try:
+            self.app.dispatch('preferences', {'language':'en','android_language_confirmed':True,'android_onboarding_complete':False})
+            self.app.dispatch('preferences', {'language':'en','android_onboarding_complete':True})
+        finally:
+            self.app.session.idle.set()
+        saved = Application(self.cwd,self.events.put).snapshot()['preferences']
+        self.assertEqual('en',saved['language'])
+        self.assertTrue(saved['android_language_confirmed'] and saved['android_onboarding_complete'])
+        self.assertEqual(before,self.app.session.log.path.read_bytes())
     def test_appearance_is_validated_saved_and_available_while_executing(self):
         self.app.session.claim()
         try:

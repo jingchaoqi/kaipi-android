@@ -69,7 +69,9 @@ class Application:
                                          'turns': len(log.state.nodes), 'current': path == s.log.path})
             data['configured'] = bool(providers.configured_models())
             data['turn_error'] = self.turn_error
-            data['appearance'] = settings.read().get('appearance', {'mode': 'system', 'color': 'forest'})
+            preferences = settings.read()
+            data['appearance'] = preferences.get('appearance', {'mode': 'system', 'color': 'forest'})
+            data['preferences'] = {key: preferences.get(key) for key in ('language', 'android_language_confirmed', 'android_onboarding_complete')}
             return data
 
     def configuration(self) -> dict[str, Any]:
@@ -79,8 +81,9 @@ class Application:
             'active': providers.active_model(),
             'models': [{'provider': p, 'id': m} for p, m in providers.configured_models()],
             'providers': [
-                {'id': name, 'url': auth.get('providers', {}).get(name, {}).get('base_url', preset.base_url),
+                {'id': name, 'url': auth.get('providers', {}).get(name, {}).get('base_url', preset.base_url) or ('https://api.anthropic.com' if name == 'anthropic' else ''),
                  'configured': bool(auth.get('providers', {}).get(name)),
+                 'protocol': preset.api,
                  'has_key': bool(auth.get('providers', {}).get(name, {}).get('api_key')),
                  'needs_key': preset.needs_key,
                  'models': auth.get('providers', {}).get(name, {}).get('models', []),
@@ -97,6 +100,21 @@ class Application:
             return self.snapshot()
         if op == 'configuration':
             return self.configuration()
+        if op == 'preferences':
+            language = body.get('language')
+            if language not in ('zh', 'en'):
+                raise ValueError('请选择简体中文或 English / Please choose a language')
+            changes = {'language': language}
+            for key in ('android_language_confirmed', 'android_onboarding_complete'):
+                if key in body:
+                    if not isinstance(body[key], bool):
+                        raise ValueError('Invalid onboarding preference')
+                    changes[key] = body[key]
+            current = settings.read() | changes
+            if current.get('android_onboarding_complete') and not current.get('android_language_confirmed'):
+                raise ValueError('Please choose a language before continuing')
+            settings.save(changes)
+            return {key: current.get(key) for key in ('language', 'android_language_confirmed', 'android_onboarding_complete')}
         if op == 'appearance':
             if body.get('mode') not in ('system', 'light', 'dark') or body.get('color') not in ('forest', 'indigo', 'clay'):
                 raise ValueError('无效的主题设置')

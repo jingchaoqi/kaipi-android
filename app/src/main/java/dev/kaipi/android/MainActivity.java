@@ -46,7 +46,7 @@ public final class MainActivity extends Activity {
                 if (url.startsWith(prefix)) {
                     String path = url.substring(prefix.length());
                     if (!path.contains("..") && !path.contains("%") && !path.contains("?")) try {
-                        String mime = path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".woff2") ? "font/woff2" : "text/html";
+                        String mime = path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".woff2") ? "font/woff2" : path.endsWith(".svg") ? "image/svg+xml" : "text/html";
                         WebResourceResponse response = new WebResourceResponse(mime, "UTF-8", getAssets().open("ui/" + path));
                         Map<String, String> headers = new HashMap<>();
                         headers.put("Cache-Control", "no-store");
@@ -125,7 +125,7 @@ public final class MainActivity extends Activity {
                     JSONObject item = legacy.getJSONObject(i); UUID.fromString(item.getString("id"));
                     seen.add(item.getString("id")); result.put(item);
                 }
-                if (!seen.contains(workspace)) result.put(new JSONObject().put("id", workspace).put("name", "默认工作区"));
+                if (!seen.contains(workspace)) result.put(new JSONObject().put("id", workspace).put("name", "默认工作区").put("is_default", true));
             } catch (JSONException | IllegalArgumentException ignored) { }
             platformEvent("workspaces", result);
         }); }

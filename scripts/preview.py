@@ -20,13 +20,15 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app/src/main/assets/runtime'))
 from core_bridge import Application
-from kaipi import providers
+from kaipi import providers, settings
 from kaipi.model import Usage
 from kaipi.providers import Reply
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--port', type=int, default=8765)
 parser.add_argument('--seed', action='store_true', help='Seed a branching conversation for screenshots/tests')
+parser.add_argument('--first-run', action='store_true')
+parser.add_argument('--delay-ready', type=float, default=0)
 args = parser.parse_args()
 temporary = tempfile.TemporaryDirectory(prefix='kaipi-preview-')
 cwd = Path(temporary.name)
@@ -58,8 +60,10 @@ class FixtureProvider:
 
 
 app = Application(cwd, publish)
-providers.save_auth('openai',api_key='local-preview-only',models=['gpt-5.6'])
-providers.use_model('openai','gpt-5.6')
+if not args.first_run:
+    providers.save_auth('openai',api_key='local-preview-only',models=['gpt-5.6'])
+    providers.use_model('openai','gpt-5.6')
+    settings.save({'language':'zh','android_language_confirmed':True,'android_onboarding_complete':True})
 app.session._provider = app.session._cheap = FixtureProvider()
 app.session.rename('让一个想法，长成一个产品')
 if args.seed:
@@ -113,15 +117,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path=='/preview.js':
             content=('''window.Native={
-ready(){const e=new EventSource('/events?t=TOKEN');e.onmessage=x=>kaipi.receive(x.data);e.onopen=async()=>{const r=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Preview-Token':'TOKEN'},body:JSON.stringify({op:'state'})});const m=await r.json();kaipi.receive({event:'ready',protocol:1,data:m.result});};},
+ready(){const e=new EventSource('/events?t=TOKEN');e.onmessage=x=>kaipi.receive(x.data);e.onopen=async()=>{const r=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Preview-Token':'TOKEN'},body:JSON.stringify({op:'state'})});const m=await r.json();setTimeout(()=>kaipi.receive({event:'ready',protocol:1,data:m.result}),DELAY);};},
 async request(json){const r=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Preview-Token':'TOKEN'},body:json});kaipi.receive(await r.json());},
 retry(){location.reload()},copy(text){navigator.clipboard.writeText(text)},pickFile(){document.getElementById('file-input').click()},workspaces(){kaipi.receive({event:'workspaces',data:[{id:'preview',name:'开发预览'}]})}
-};'''.replace('TOKEN',token)).encode();mime='application/javascript'
+};'''.replace('TOKEN',token).replace('DELAY',str(int(args.delay_ready*1000)))).encode();mime='application/javascript'
         else:
             relative='index.html' if path=='/' else path.lstrip('/')
             file=(ROOT/'app/src/main/assets/ui'/relative).resolve()
             if not file.is_relative_to(ROOT/'app/src/main/assets/ui') or not file.is_file():return self.json({'error':'Not found'},404)
-            content=file.read_bytes();mime='text/html' if file.suffix=='.html' else 'text/css' if file.suffix=='.css' else 'application/javascript'
+            content=file.read_bytes();mime='text/html' if file.suffix=='.html' else 'text/css' if file.suffix=='.css' else 'image/svg+xml' if file.suffix=='.svg' else 'application/javascript'
             if file.name=='index.html':content=content.replace(b'<script defer',b'<script src="/preview.js"></script><script defer',1)
         self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.send_header('Content-Length',str(len(content)));self.end_headers();self.wfile.write(content)
 

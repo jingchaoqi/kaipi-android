@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#f8f9f6">
 <title>kaipi · 开辟</title>
 <script src="theme.js"></script>
+<script src="locale.js"></script>
 <link rel="stylesheet" href="style.css">
 <script defer src="vendor/marked.js"></script>
 <script defer src="render.js"></script>
@@ -49,13 +50,13 @@
 <div id="app" class="app">
 <button id="scrim" class="scrim" aria-label="关闭侧栏" tabindex="-1"></button>
 <aside id="sidebar" class="sidebar" aria-label="会话">
-  <div class="brand"><span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M16 27V6m0 13C7 19 6 15 6 10m10 5c9 0 10-4 10-9"/><circle cx="16" cy="5" r="2"/><circle cx="6" cy="8" r="2"/><circle cx="26" cy="4" r="2"/></svg></span><span>kaipi<span class="brand-dot">.</span></span><button id="sidebar-close" class="icon-button mobile-only" aria-label="关闭会话侧栏"><svg><use href="#i-close"/></svg></button></div>
+  <div class="brand"><span class="official-mark"><img class="official-light" src="kaipi-logo.svg" alt=""><img class="official-dark" src="kaipi-logo-dark.svg" alt=""></span><span>kaipi<span class="brand-dot">.</span></span><button id="sidebar-close" class="icon-button mobile-only" aria-label="关闭会话侧栏"><svg><use href="#i-close"/></svg></button></div>
   <button id="new-chat" class="new-chat"><svg><use href="#i-plus"/></svg>开启新对话<span>↗</span></button>
   <div class="sidebar-caption">你的思路，逐渐成形</div>
   <label class="search"><svg><use href="#i-search"/></svg><input id="session-search" placeholder="查找对话" aria-label="查找对话"></label>
   <div class="section-label">对话 <span id="session-count">0</span></div>
   <nav id="sessions" class="sessions" aria-label="对话列表"></nav>
-  <div class="sidebar-bottom"><button id="workspace" class="workspace"><span class="workspace-icon"><svg><use href="#i-folder"/></svg></span><span><strong>本地工作区</strong><small>想法与文件，留在这里</small></span><svg><use href="#i-down"/></svg></button><button id="appearance-button" class="settings-row"><svg><use href="#i-palette"/></svg>外观与色彩<span>↗</span></button><button id="settings" class="settings-row"><svg><use href="#i-settings"/></svg>模型与设置<span>↗</span></button></div>
+  <div class="sidebar-bottom"><button id="workspace" class="workspace"><span class="workspace-icon"><svg><use href="#i-folder"/></svg></span><span><strong>本地工作区</strong><small>想法与文件，留在这里</small></span><svg><use href="#i-down"/></svg></button><button id="language-settings" class="settings-row"><span class="language-icon" aria-hidden="true">文<span>A</span></span>界面语言<span>↗</span></button><button id="appearance-button" class="settings-row"><svg><use href="#i-palette"/></svg>外观与色彩<span>↗</span></button><button id="settings" class="settings-row"><svg><use href="#i-settings"/></svg>模型与设置<span>↗</span></button></div>
 </aside>
 <main class="main">
   <header class="topbar">
@@ -63,7 +64,7 @@
     <button id="tree-toggle" class="context-toggle" aria-expanded="false"><svg><use href="#i-tree"/></svg><span>上下文</span><b id="node-count">0</b></button>
   </header>
   <div class="conversation-heading" id="conversation-heading" hidden><button id="rename" title="重命名对话"><span id="chat-title">新的对话</span><svg><use href="#i-edit"/></svg></button><span id="chat-subtitle">从一个问题开始，让思路自由生长。</span></div>
-  <div id="connection" class="connection" role="status"><span class="spinner"></span><span>正在唤醒本地引擎…</span></div>
+
   <div id="scroll" class="conversation-scroll">
     <section id="welcome" class="welcome">
       <div class="welcome-eyebrow"><span class="eyebrow-line"></span> 留出空间，探索更多可能</div>
@@ -79,7 +80,7 @@
   </div>
   <button id="jump-bottom" class="jump-bottom icon-button" aria-label="回到最新消息" hidden><svg><use href="#i-down"/></svg></button>
   <footer class="composer-area">
-    <div id="context-bar" class="context-bar"><button id="cursor-chip" class="cursor-chip"><span class="status-dot"></span><span>新的起点</span><svg><use href="#i-down"/></svg></button><span id="context-size">上下文 0 tokens</span></div>
+    <div id="context-bar" class="context-bar"><div id="connection" class="connection" role="status" aria-live="polite"><span class="engine-sprout" aria-hidden="true"><i></i><i></i><i></i></span><span>正在加载kaipi引擎</span></div><button id="cursor-chip" class="cursor-chip" hidden><span class="status-dot"></span><span>新的起点</span><svg><use href="#i-down"/></svg></button><span id="context-size" hidden>上下文 0 tokens</span><button id="provider-reminder" class="provider-reminder" hidden>首次对话前连接模型</button></div>
     <div id="pending" class="pending"></div>
     <form id="composer" class="composer">
       <div id="attachments" class="attachments"></div>

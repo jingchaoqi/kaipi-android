@@ -23,7 +23,7 @@ class RuntimePackageTest(unittest.TestCase):
         cls.apk.close()
 
     def test_gui_entry_and_assets_replace_the_terminal(self):
-        for name in ['index.html', 'app.js', 'model.js', 'theme.js', 'style.css', 'render.js', 'vendor/marked.js']:
+        for name in ['index.html', 'app.js', 'model.js', 'theme.js', 'style.css', 'render.js', 'locale.js', 'kaipi-logo.svg', 'kaipi-logo-dark.svg', 'vendor/marked.js']:
             self.assertIn('assets/ui/' + name, self.names)
         self.assertFalse(any(name.startswith('assets/terminal/') for name in self.names))
         self.assertNotIn('assets/runtime/android_tui.py', self.names)
@@ -33,6 +33,10 @@ class RuntimePackageTest(unittest.TestCase):
                 if isinstance(node, ast.ImportFrom):
                     self.assertNotIn(node.module, ['kaipi.cli', 'kaipi.tui', 'kaipi.server', 'kaipi.views'])
                     self.assertFalse(node.module == 'kaipi' and any(alias.name in ['cli', 'tui', 'server', 'views'] for alias in node.names))
+
+    def test_official_brand_assets_are_packaged_unchanged(self):
+        for name in ['kaipi-logo.svg', 'kaipi-logo-dark.svg']:
+            self.assertEqual((ROOT / 'docs/assets' / name).read_bytes(), self.apk.read('assets/ui/' + name))
 
     def test_vendored_core_matches_the_upstream_wheel_record(self):
         record = self.apk.read('assets/runtime/kaipi-0.2.0.dist-info/RECORD').decode()

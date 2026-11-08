@@ -105,6 +105,12 @@ try {
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
   await page.click('#dialog-close');
   await page.click('#sidebar-close');
+  const originalQuestion = await page.locator('.question-bubble').first().textContent();
+  await page.click('#sidebar-toggle'); await page.click('#language-settings'); await page.click('[data-language-setting=en]');
+  assert.equal(await page.evaluate(()=>document.documentElement.lang),'en');
+  assert.equal(await page.locator('.question-bubble').first().textContent(),originalQuestion);
+  assert.ok((await page.textContent('#tree-toggle')).includes('Context'));
+  await page.click('#sidebar-close');
   // A narrow viewport and a raised keyboard must keep the composer accessible.
   await page.setViewportSize({width:320,height:520});
   await page.waitForTimeout(100);
