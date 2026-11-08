@@ -1,91 +1,105 @@
 # kaipi Android
 
-一个 APK，打开就是原版 kaipi TUI。Android 层只提供 Python 运行时、终端和输入法上方的快捷键，不依赖 Termux 或远程主机，暂不适配 canvas。
+一个独立的 Android AI 助手。对话、模型配置和树形上下文都有自己的 GUI；通过私有进程管道直接调用内置 kaipi core。Android 界面不导入或启动 CLI、TUI、Canvas，也不发送 slash 命令。
 
-**开发预览版，尚未完成正常首启和界面验收。** 已原样引入 kaipi 0.1.3（提交见 `vendor/kaipi/REVISION`），内置 Android CPython 3.13、TUI 依赖及本地 Git。构建目标为 Android 8.0+，arm64-v8a / x86_64，需要较新的系统 WebView。当前只提供调试构建；缺少的图片、Office 原生依赖会阻止完整 release 构建。
+## 界面与操作
 
-## 使用与会话
+- 对话页：Markdown、代码复制、可展开的工具调用、执行进度、停止、文件附件和会话草稿。
+- 上下文树：主干与探索分支用不同颜色区分；支持平移、缩放、适应视图、定位当前位置、折叠子树和显示归档。
+- 节点详情：查看完整内容、从这里继续或探索、设为主干、按三种深度嫁接、移除待嫁接项、归档和恢复分支。回退提供对话、代码和两者三种模式，并显示受影响文件。
+- 会话：新建、搜索、重命名和恢复。切换时保留尚未发送的草稿；后台进程结束后从 core 的日志恢复。
+- 模型：服务商地址、key 和模型列表、模型切换、模型/价格目录预览后保存。key 不回传给 GUI。
+- 外观：跟随系统、浅色、深色；松绿、靛蓝、陶土三种配色。切换即时生效，保存到本地设置，状态栏与导航栏同步。尊重系统减少动态效果设置。
 
-首次启动安装 APK 内置运行时，然后进入 kaipi 自己的模型配置流程。模型服务和 API key 仍由用户配置；API key 不包含在 APK 中。
+手机上会话列表是左侧抽屉，上下文树是独立全屏面板，节点操作位于面板下部。所有资源随 APK 提供，无 CDN、网页远程代码或 WebView 对模型端点的直接访问。
 
-顶部名称打开会话列表，`+` 新建，`⋮` 重命名、重启或关闭。切换保留进程和终端内容，各会话的 Ctrl 状态独立。键盘上方一排可横向滚动的按钮提供方向键、`/`、Tab、Esc、Ctrl、Ctrl-C、Enter。
+## 架构
 
-Android 输入区紧跟回答，键盘收起后扩大的区域留在输入区下方，避免回答与输入框之间出现大段空行。这项布局适配位于 `runtime/android_tui.py`，不修改打包的 kaipi 文件；保留原版输入、补全和状态栏。终端支持慢速拖动和松手后的惯性滚动，再次触摸、输入或调整窗口尺寸会停止惯性。
-
-每个终端使用独立私有工作目录，共享 HOME 中的模型配置。空工作目录自动初始化 Git，供 kaipi 快照/回退使用。会话列表和选中项会保存；重新启动通过原版 `-c` 继续该目录最近的会话。关闭终端保留磁盘文件，终端滚屏不持久化。没有后台保活服务，Android 结束 App 后需要重启进程。
-
-## 更新核心
-
-```sh
-python3 scripts/update-core.py           # 最新 master
-python3 scripts/update-core.py v0.1.3    # 指定上游 ref
+```text
+Android Activity / 系统文件选择与剪贴板
+    └─ 本地 WebView GUI（ui/）
+        └─ Native.request → LocalCore → CPython 子进程 / 私有 stdin、stdout
+            └─ core_bridge.Application
+                └─ kaipi.core.Session / core.run_input
+                   providers / catalog / settings / attachments
 ```
 
-脚本使用 uv 构建上游 wheel，原样引入 `kaipi/` 和版本元数据，记录提交、许可证、依赖声明及锁文件。不要直接改 `app/src/main/assets/runtime/kaipi/`；Android 入口 `main.py` 在其外部。
+`core_bridge.py` 只做请求、结果与事件的数据转换。所有游标移动、嫁接验证、日志写入、快照、回退和并发规则都由上游 core 实现。运行时入口 `main.py` 设置证书与配置目录，初始化空工作区的 Git，再运行桥接。
 
-更新后重新运行 runtime 构建和验证，再生成 APK。安装新版 APK 时，根据内置运行时内容摘要刷新代码和依赖，保留 HOME 与工作目录。依赖引入新的原生库时，需要继续适配 Android。
+协议为 UTF-8 JSONL，请求含 `id/op/body`，响应含 `id/result` 或 `id/error`。回合事件走同一输出管道。回调只入队，不阻塞 core；工作线程退出后再发送 `settled` 快照，避免 GUI 在 core 尚忙时接受下一次操作。stdout 专用于协议，依赖诊断写 stderr，Java 只排空、不展示诊断流。停止和关闭使用 core 的停止机制，Activity 销毁时回收进程。
 
-**原生 `/update` 尚未支持。** 上游要求 `uv tool` 安装收据和可执行入口；当前 APK 不具备这一安装布局。目标是让纯 Python 核心独立更新，仍需完成 uv/入口/依赖兼容方案。Python ABI、原生库或 Android 权限发生变化时，仍可能需要新版 APK。
+每个工作区使用独立 Python 进程与正确的工作目录；HOME 中共享服务商配置。旧版 `tabs` 中的工作区通过侧栏底部的工作区入口继续访问，`.kaipi` 历史不转换、不重写。原有核心包由上游 wheel 原样引入；Android 适配在包外。
 
 ## 构建
 
-Linux 构建机需要 Python 3.11+、uv、Rust 1.90（rustup）、Node.js、JDK 17+；Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973 和 CMake 3.22.1。设置 `ANDROID_HOME`、`JAVA_HOME`。
+需要 Linux、Python 3.11+、uv、Node.js、JDK 17+、Rust 1.90、Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973。构建目标 Android 8.0+，包含 arm64-v8a / x86_64。建议使用最新 Android System WebView。
 
 ```sh
 npm ci --ignore-scripts
 npm run assets
 rustup toolchain install 1.90.0 --profile minimal
 python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug :app:lintDebug
 ```
 
-运行时构建自动下载并校验 CPython Android 包、上游锁定依赖和 Git 源码；用 NDK 编译 Python 入口、本地 Git、pydantic-core、jiter。默认缓存 `.tools/runtime`，可用 `--cache` 指定位置。首次构建需要联网，耗时明显长于 APK 编译。生成的库和依赖不提交到仓库。
+APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.0，包名与开发签名保持兼容，可覆盖旧预览版安装。
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。
+更新 core：
 
-## GitHub Actions 自动编译
+```sh
+python3 scripts/update-core.py v0.2.0
+```
 
-[Build APK](.github/workflows/build-apk.yml) 在推送到 `master`、提交 PR 时自动执行，也可在 GitHub 的 **Actions → Build APK → Run workflow** 手动触发。
+当前固定上游 `65f4290a48f8244e9588f0716cbf98c306953f35`。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
-工作流安装固定版本的构建工具，编译仓库中已锁定的 kaipi 核心及 Android 原生依赖，运行快捷键、主机 PTY、APK 完整性测试和 Android lint。原生构建与 Gradle/npm 依赖使用缓存；首次运行需要完整编译。CI 不运行 Android 交互验收。
+安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内暂不提供 core 在线更新。
 
-成功后，在该次运行的 **Artifacts** 中下载 `kaipi-android-debug-<运行编号>`，解压得到 `kaipi-android-debug.apk` 和 `SHA256SUMS`。一个 APK 同时包含 arm64-v8a 和 x86_64。预览版使用仓库内公开的 `app/debug.keystore`，让后续 CI 构建可覆盖安装；此开发密钥不能用于正式发行。最初的第 3 次构建使用临时签名，升级到固定签名需要先备份数据并卸载旧包。构建报告另存为 `build-reports-<运行编号>`，产物保留 14 天。此流程只上传 Actions 构建产物，不创建 GitHub Release。
-
-## 验证
+## 验证与预览
 
 ```sh
 npm test
-python3 -m pip install 'prompt-toolkit==3.0.53'
-python3 tests/test_android_tui.py
-sh scripts/test-native.sh
+sh scripts/test-host.sh
 python3 tests/test_runtime_package.py
-# 安装并打开调试 APK，等待运行时初始化；连接 adb 后：
-python3 scripts/test-android.py  # 主机需 openssl，自动生成临时 TLS 测试证书
+# 在已启动的 APK 中验证 Android CPython、TLS、本地 shell、Git 与会话：
+python3 scripts/test-android.py
+# 完整协议 / 拒绝不可信证书测试（包含 Anthropic SDK）：
+python3 scripts/test-android.py --suite full
 ```
 
-快捷键测试覆盖 ANSI/application cursor、Ctrl、Unicode；触摸测试覆盖小幅拖动累计、惯性、反向滑动、边界及取消。布局测试使用真实 prompt-toolkit 容器，检查紧凑布局和重复安装。Linux JNI 测试使用真实 PTY，验证输入输出、尺寸、退出码、终止和并发会话。APK 检查验证 Python 资源是否完整、原生模块 ABI 是否匹配。Android 测试在 App UID 下运行打包的 Python，验证原生导入、shell、Git 快照/回退、会话保存，以及 OpenAI/Anthropic 协议的 HTTPS 请求与流式响应；同时验证不可信证书会被拒绝。模型端点是本地 mock，不能代替真实 API 与交互测试。
+桥接测试使用真实 core、JSONL、Git 和独立子进程，覆盖树操作、并发停止、模型错误、回退、配置保密、主题持久化与附件验证。APK 测试验证资源、ABI、版本摘要及 GUI 入口。
 
-Android 入口通过 `SSL_CERT_FILE` 指向随 APK 打包的 certifi CA，保留显式配置的证书路径。独立 CPython 没有可用的 OpenSSL 系统证书目录；不配置时，Anthropic SDK 的 httpx2 会在 HTTPS 握手失败后显示 `APIConnectionError: Connection error`。价格表来自本地文件，其显示不能证明 API 连通。
+浏览器交互测试需要 Playwright 的 Chromium，以及安装了 kaipi 依赖的主机 Python：
 
-2026-11-03 验证结果：
+```sh
+npx playwright install chromium
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
+```
 
-- 双架构 debug APK 构建成功，约 40 MB；25 个上游核心文件逐文件校验一致。
-- 3 项快捷键测试、主机 PTY 集成测试、3 项 APK 完整性/ABI/版本摘要测试通过。
-- Android lint：0 errors、4 warnings（JavaScript、备份规则、图标和国际化提示）。
-- Android 11 x86_64 模拟器中，CPython/原生模块/kaipi 导入、本地 shell、Git 快照/回退、会话保存、mock 模型 HTTP 请求全部通过；旧运行时成功替换为新 APK 的内容。
-- **界面验证受阻**：当前云环境无 KVM，软件模拟器 35.2.10 与 37.3.6 的 WebView 83 均将 `NaN | 0` 错算为 `2147483647`，导致终端初始化异常。上述 Android 原生测试通过调试入口启动运行时，不能据此宣称正常首启已通过。尚无 arm64 真机、中文输入法、多会话界面或真实模型 API 的验收结果。
+可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
 
-2026-11-04：在同一 Android 运行时中验证了证书适配修复。旧入口没有 CA 配置，新入口加载打包证书；不可信证书被拒绝，Anthropic HTTPS 流式响应及 OpenAI HTTPS 响应通过。本次使用本地 TLS 测试服务，未使用真实供应商 API key。
+开发预览使用隔离的临时工作区与固定测试模型，**只用于开发，不连接真实服务商，不包含在 APK 中**：
 
-2026-11-04 键盘与滚动修复：在桌面 Chromium 移动视口中连接真实 PTY 和打包的 kaipi 输入区，验证回答后反复切换 390/720 像素高度，回答与输入区间未新增空行；触摸事件验证慢速拖动、惯性和反向滚动，包含 5000 行历史及非整数像素密度。双架构 APK 构建及 lint 通过（0 errors、4 个原有 warnings）。这些验证不包含 Android 真机中文输入法验收。
+```sh
+.tools/host-tests/bin/python scripts/preview.py --seed
+```
 
-## 当前边界
+## 本次验证
 
-- 不改写上游核心、TUI、模型配置或 `.kaipi` 格式。
-- 本地 Git 支持快照/回退；暂不包含 HTTP/SSH clone/fetch 的运行依赖。
-- 图片/Office 处理的 lxml、numpy、onnxruntime、pandas、pillow、pillow-heif 尚未移植；相关功能不可用。
-- 尚未接入 Android 文件选择、剪贴板附件、后台服务或 APK 内在线升级。
-- 原生库从 APK 的 `nativeLibraryDir` 执行；HOME、TMPDIR、Python 包和工作目录位于 App 私有目录。
-- 中文输入法、旋转、多会话切换以及真实模型调用仍需 Android 交互验收。
+- 主机：7 项桥接集成测试、3 项树布局测试通过；浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果。
+- 双架构 debug APK 构建、5 项 APK 完整性/ABI/上游 wheel 一致性检查通过；Android lint 为 0 errors、2 warnings。
+- Android 11 x86_64 软件模拟器：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
+- 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
 
-许可证位于 `vendor/kaipi/LICENSE` 和 `app/src/main/assets/licenses/`。CPython Android 二进制来自 Chaquopy Maven 包；Git 使用 GPLv2，精确源码版本、下载地址与构建选项见 `scripts/runtime.lock.json` 和 `scripts/build-runtime.py`。发布 APK 时需同时履行所含依赖的许可证及对应源码提供义务。
+## 当前限制
+
+- 图片、Office 附件的部分原生依赖仍未移植；不支持的文件会在提交前报错，不能视作完整附件支持。
+- Git 支持本地快照/回退，暂不提供 HTTP/SSH clone/fetch 的完整运行依赖。
+- 没有后台保活服务。Android 结束应用后，已落盘历史可恢复，正在执行的回合不能保证继续。
+- 文本草稿可跨重启恢复；附件草稿只在当前应用生命周期内保留。
+- 界面按模型回复更新文本，并非逐 token 输出。停止 bash 可快速生效，等待模型网络请求时可能要到请求返回才结束。
+- 尚需 arm64 真机、不同中文输入法、文件选择器及无障碍服务的交互验收。浏览器检查不能代替这些验收。
+- 预览版使用公开开发签名，不用于正式发行。
+
+CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交互测试、Android lint 和 APK 完整性检查，然后提供调试 APK。模拟器/真机验收单独执行。
+
+许可证：上游 kaipi 为 MIT；CPython 来自 Chaquopy Android 构建，Git 使用 GPLv2。精确版本与源码地址在 `scripts/runtime.lock.json`、`scripts/build-runtime.py` 和 `app/src/main/assets/licenses/`。发布时需履行各依赖的许可证和对应源码提供义务。

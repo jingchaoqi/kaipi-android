@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--adb", default="adb")
 parser.add_argument("--entry", type=Path, help="Test a replacement Android entry before rebuilding the APK")
+parser.add_argument("--suite", choices=["gui", "full"], default="gui", help="Focused GUI/core smoke or full legacy protocol/TLS suite")
 args = parser.parse_args()
 
 
@@ -26,7 +27,7 @@ runtime = data + "/files/runtime"
 if subprocess.run([args.adb, "shell", "run-as", app, "test", "-f", "files/runtime/.installed"]).returncode:
     raise SystemExit("Open the app and wait for runtime initialization before running this test.")
 command = shlex.join(["run-as", app, "sh", "-c", "cat > files/android_smoke.py"])
-adb("shell", command, input=(ROOT / "tests/android_smoke.py").read_bytes())
+adb("shell", command, input=(ROOT / ("tests/android_gui_smoke.py" if args.suite == "gui" else "tests/android_smoke.py")).read_bytes())
 with tempfile.TemporaryDirectory() as temporary:
     fixture = Path(temporary)
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",

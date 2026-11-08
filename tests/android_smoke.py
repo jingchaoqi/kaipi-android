@@ -27,7 +27,8 @@ from importlib.metadata import version
 import jiter
 from pydantic import BaseModel
 from kaipi import agent, guard, providers
-from kaipi.cli import Session
+from kaipi.core import Session
+from core_bridge import Application
 
 
 class Record(BaseModel):
@@ -42,7 +43,7 @@ with tempfile.TemporaryDirectory() as directory:
     cwd = Path(directory)
     os.environ["XDG_CONFIG_HOME"] = str(cwd / "config")
     subprocess.run(["git", "init", "--template=", "-q", str(cwd)], check=True)
-    assert agent.run_bash("printf terminal-ok", cwd) == "terminal-ok"
+    assert agent.run_bash("printf core-ok", cwd) == "core-ok"
     file = cwd / "sample.txt"
     file.write_text("before")
     snapshot = guard.snapshot(cwd)
@@ -133,6 +134,18 @@ with tempfile.TemporaryDirectory() as directory:
         assert requests[0][0] == "/v1/chat/completions"
         assert requests[0][1]["model"] == "model"
         print("PASS: upstream OpenAI-compatible provider over verified HTTPS (mock model)", flush=True)
+        app = Application(cwd, lambda event: None)
+        app.session._provider = app.session._cheap = provider
+        app.session.rename('Android GUI bridge test')
+        app.dispatch('turn', {'text':'verify the Android core adapter'})
+        app.worker.join(30)
+        snapshot = app.snapshot()
+        assert not snapshot['busy'] and snapshot['leaf']
+        assert snapshot['history'][-1]['content'][-1]['text'] == 'ANDROID_OK'
+        assert not {'kaipi.cli', 'kaipi.tui', 'kaipi.server', 'kaipi.views', 'prompt_toolkit', 'typer'} & sys.modules.keys()
+        app.dispatch('appearance', {'mode':'dark','color':'indigo'})
+        assert app.snapshot()['appearance'] == {'mode':'dark','color':'indigo'}
+        print('PASS: Android adapter → core → HTTPS model → saved history, headless imports, theme preferences', flush=True)
         provider.client.close()
     finally:
         server.shutdown()

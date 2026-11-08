@@ -2,7 +2,7 @@
 **/build/
 local.properties
 node_modules/
-app/src/main/assets/terminal/vendor/
+app/src/main/assets/ui/vendor/
 .tools/
 *.apk
 **/.cxx/
@@ -12,3 +12,6 @@ app/src/main/jniLibs/
 app/src/main/assets/runtime/python/
 app/src/main/assets/runtime-abi/
 app/src/main/assets/runtime-status.json
+
+.preview/
+dist/

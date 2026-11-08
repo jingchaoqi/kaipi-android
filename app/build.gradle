@@ -2,7 +2,6 @@ plugins { id 'com.android.application' }
 
 android {
     namespace 'dev.kaipi.android'
-    ndkVersion '27.0.12077973'
     compileSdk 35
     buildToolsVersion "35.0.0"
     // Public development key: keep CI preview builds installable over each other.
@@ -18,14 +17,12 @@ android {
         applicationId 'dev.kaipi.android'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.2.0'
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
-        externalNativeBuild { cmake { cppFlags '-std=c++17 -Wall -Wextra' } }
     }
-    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
     // Python packages legitimately contain directories such as zipfile/_path and httpx/_transports.
-    androidResources { ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~' }
+    androidResources { ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:__pycache__:*.pyc' }
     packaging { jniLibs { useLegacyPackaging = true } }
     sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/runtime-assets')
     compileOptions {
@@ -35,16 +32,15 @@ android {
 }
 
 
-tasks.register('checkTerminalAssets') {
+tasks.register('checkGuiAssets') {
     doLast {
-        ['xterm.js', 'xterm.css', 'addon-fit.js'].each {
-            if (!file("src/main/assets/terminal/vendor/$it").exists()) {
-                throw new GradleException('Run npm install --ignore-scripts && npm run assets first.')
-            }
+        ['marked.js'].each {
+            if (!file("src/main/assets/ui/vendor/$it").exists())
+                throw new GradleException('Run npm ci --ignore-scripts && npm run assets first.')
         }
     }
 }
-tasks.named('preBuild').configure { dependsOn 'checkTerminalAssets' }
+tasks.named('preBuild').configure { dependsOn 'checkGuiAssets' }
 
 tasks.register('checkRuntime') {
     doLast {
@@ -62,7 +58,7 @@ tasks.named('preBuild').configure { dependsOn 'checkRuntime' }
 // Refresh bundled code on APK upgrades, while leaving HOME and workspaces intact.
 tasks.register('runtimeIdentity') {
     dependsOn 'checkRuntime'
-    def payload = files(fileTree('src/main/assets/runtime'), fileTree('src/main/assets/runtime-abi'))
+    def payload = files(fileTree('src/main/assets/runtime') { exclude '**/__pycache__/**', '**/*.pyc' }, fileTree('src/main/assets/runtime-abi') { exclude '**/__pycache__/**', '**/*.pyc' })
     def output = layout.buildDirectory.file('generated/runtime-assets/runtime-id')
     inputs.files(payload)
     outputs.file(output)
