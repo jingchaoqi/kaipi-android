@@ -12,6 +12,7 @@
   <a href="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml"><img src="https://github.com/jingchaoqi/kaipi-android/actions/workflows/build-apk.yml/badge.svg" alt="Build APK"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-627D6D?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/中文_%2F_English-365D47?style=flat-square" alt="中文 / English">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-627D6D?style=flat-square" alt="MIT License"></a>
 </p>
 
 <p align="center"><a href="#安装">下载安装</a> · <a href="#让上下文可见">树形上下文</a> · <a href="#为手机而设计">界面与体验</a> · <a href="docs/DEVELOPMENT.md">开发文档</a></p>
@@ -102,5 +103,6 @@ API key 保存在应用私有目录，不写入对话或工作区。
 ---
 
 Android 层直接使用上游 kaipi core，独立实现界面。
+本项目原创代码采用 [MIT 许可证](LICENSE)。
 [kaipi](https://github.com/jingchaoqi/kaipi) 为 MIT；Git 与其他内置组件按各自许可证分发。
 详细版本、许可证和源码要求见 [开发文档](docs/DEVELOPMENT.md#许可证与分发)。

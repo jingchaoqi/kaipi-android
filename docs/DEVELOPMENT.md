@@ -108,6 +108,8 @@ CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交�
 
 ## 许可证与分发
 
+本项目原创代码采用 [MIT 许可证](../LICENSE)，许可证副本随 APK 打包在 `licenses/kaipi-android.txt`。
+第三方组件保留各自的版权声明与许可证，不因本项目采用 MIT 而改变。
 上游 kaipi 许可证见 [vendor/kaipi/LICENSE](../vendor/kaipi/LICENSE)。
 CPython、Git 及其他依赖的许可证保存在 APK 的 `licenses/` 与各 Python 发行元数据中。
 Git 使用 GPLv2；发布 APK 时需履行对应源码提供义务。
