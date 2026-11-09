@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,26 @@ class BridgeTests(unittest.TestCase):
         self.app.dispatch('model', {'provider':'openai','model':'second'})
         self.assertEqual('openai/second', providers.active_model())
         with self.assertRaises(ValueError): self.app.dispatch('model', {'provider':'openai','model':'missing'})
+    def test_non_utf8_tool_output_completes_and_survives_reload(self):
+        raw = b'12345678901234567890123456\x82 ' + '正常文本'.encode()
+        command = shlex.join([sys.executable, '-c', f"import os; os.write(1,{raw!r}); os.write(2,b'error\\xff')"])
+        class Binary(Echo):
+            calls = 0
+            def complete(self, *args):
+                self.calls += 1
+                if self.calls == 1:
+                    return Reply(content=[{'type':'tool_use','id':'binary','name':'bash','input':{'command':command}}], stop_reason='tool_use', usage=Usage(output=3))
+                return super().complete(*args)
+        self.app.session._provider = Binary()
+        state = self.turn('read non-UTF-8 output')
+        self.assertEqual('', state['turn_error'])
+        output = next(item['text'] for item in state['history'][-1]['content'] if item['kind']=='out')
+        self.assertIn('12345678901234567890123456\ufffd 正常文本', output)
+        self.assertIn('error\ufffd', output)
+        self.assertEqual(state['history'], Application(self.cwd,self.events.put).snapshot()['history'])
+        state = self.turn('continue')
+        self.assertEqual(2, len(state['history']))
+        self.assertEqual('', state['turn_error'])
     def test_language_is_required_before_completing_onboarding(self):
         with self.assertRaises(ValueError):
             self.app.dispatch('preferences', {'language':'en','android_onboarding_complete':True})

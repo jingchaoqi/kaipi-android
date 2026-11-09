@@ -8,6 +8,7 @@ import ast
 import os
 import re
 import subprocess
+import tomllib
 import unittest
 import zipfile
 
@@ -51,7 +52,10 @@ class RuntimePackageTest(unittest.TestCase):
             self.assertEqual((ROOT / 'docs/assets' / name).read_bytes(), self.apk.read('assets/ui/' + name))
 
     def test_vendored_core_matches_the_upstream_wheel_record(self):
-        record = self.apk.read('assets/runtime/kaipi-0.2.0.dist-info/RECORD').decode()
+        version = tomllib.loads((ROOT / 'vendor/kaipi/pyproject.toml').read_text())['project']['version']
+        records = sorted(name for name in self.names if re.fullmatch(r'assets/runtime/kaipi-[^/]+\.dist-info/RECORD', name))
+        self.assertEqual(records, [f'assets/runtime/kaipi-{version}.dist-info/RECORD'])
+        record = self.apk.read(records[0]).decode()
         count = 0
         for path, digest, size in csv.reader(io.StringIO(record)):
             if path.startswith('kaipi/') and digest:

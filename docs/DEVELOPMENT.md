@@ -59,10 +59,10 @@ CI 的 APK 检查会验证签名并比对该指纹，发现变化即失败；Git
 更新 core：
 
 ```sh
-python3 scripts/update-core.py v0.2.0
+python3 scripts/update-core.py v0.2.1
 ```
 
-当前固定上游 `65f4290a48f8244e9588f0716cbf98c306953f35`。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
+当前引入 kaipi core **0.2.1**，固定上游 `4fccca669c006f01aa040cbff42c7598b6b4fb68`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
 安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内暂不提供 core 在线更新。
 
@@ -98,9 +98,9 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 
 ## 本次验证
 
-- 主机：8 项桥接集成测试、3 项树布局测试通过；浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果。
-- 双架构 debug APK 构建、6 项 APK 完整性/ABI/上游 wheel 一致性检查通过；Android lint 为 0 errors、2 warnings。
-- Android 11 x86_64 软件模拟器：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
+- 主机：9 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果。
+- 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
+- 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。本次 core 0.2.1 更新尚未重跑设备验收。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
 
 ## 当前限制

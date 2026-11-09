@@ -1,5 +1,5 @@
 kaipi/__init__.py,sha256=TcE2ADoVY05gmt_prvzixN1gGqC3Fx7ktSuzuEREgg8,123
-kaipi/agent.py,sha256=2qtpjeNxKuRII77sFHLKfVKWFbP_lbffu-pGKz8Ja4E,9551
+kaipi/agent.py,sha256=wm_xkZqjFX5Fk3fjgjCoIuNvY3vs43sJg7-LG4U0ydc,9603
 kaipi/canvas.html,sha256=dzzCrdcRWNgvemqs8L9cc3lQBluEKXIzmQY0cFiDohs,47138
 kaipi/catalog.py,sha256=aSDX2AMy2oLw5v4Sl5AnDcC6TTAi8qAcVFwTXpKbJ90,2516
 kaipi/cli.py,sha256=l4Cpc18cQYWU26o2afZj3HZXK7IS0PAeziEGwnutbtk,25283
@@ -34,8 +34,8 @@ kaipi/providers/anthropic.py,sha256=S_9BTcC7dOeavRWX4Ln2cYXaCkp1m1zyHbayPT-fvrI,
 kaipi/providers/gemini.py,sha256=FgZX_L8fc3nuGaEUjV1E0NqwK9_9-eAPA2f7rtif_mY,4719
 kaipi/providers/openai_compat.py,sha256=OJiEcrqKal-H3N_mzKT5YmzgtFpSk0E1Kaizllld3CY,4924
 kaipi/providers/openai_responses.py,sha256=1GuRbRNdlYCptnIOlKtqzaesH-EQcf7Y0vBOudS-rIk,5419
-kaipi-0.2.0.dist-info/METADATA,sha256=CPmaJaFNXPM7Wbk4tehO5yOQlELdkFvuWJQo0lbmv1Y,11164
-kaipi-0.2.0.dist-info/WHEEL,sha256=2iZrJkDIkeDh0k9SikKMqFuRP-ua6mb4Ir1AsER4BEw,87
-kaipi-0.2.0.dist-info/entry_points.txt,sha256=wgW4qTQw5qBUX5Ul85r-fE1kvrdsN0eqw6OWYLSgOMM,40
-kaipi-0.2.0.dist-info/licenses/LICENSE,sha256=QED7SEM3X6cogt5sj51GBXP6E8Kcdbv_3CJMSyWlQ3k,1075
-kaipi-0.2.0.dist-info/RECORD,,
+kaipi-0.2.1.dist-info/METADATA,sha256=BDWV-SyTThe5cMuCZtqgYnUBsJem5xSP_9GWnPPv3Rk,11164
+kaipi-0.2.1.dist-info/WHEEL,sha256=2iZrJkDIkeDh0k9SikKMqFuRP-ua6mb4Ir1AsER4BEw,87
+kaipi-0.2.1.dist-info/entry_points.txt,sha256=wgW4qTQw5qBUX5Ul85r-fE1kvrdsN0eqw6OWYLSgOMM,40
+kaipi-0.2.1.dist-info/licenses/LICENSE,sha256=QED7SEM3X6cogt5sj51GBXP6E8Kcdbv_3CJMSyWlQ3k,1075
+kaipi-0.2.1.dist-info/RECORD,,
