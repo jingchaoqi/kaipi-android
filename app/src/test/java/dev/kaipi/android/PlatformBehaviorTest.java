@@ -70,6 +70,15 @@ public class PlatformBehaviorTest {
         restored.install("123"); idle(restored);
         assertEquals(1, shadow.getRequestCount());
     }
+    @Test @Config(sdk = 28) public void backgroundingBeforeStoragePermissionDoesNotLeaveTheActionStuck() throws Exception {
+        List<JSONObject> events = new CopyOnWriteArrayList<>(); AppUpdates manager = updater(events);
+        Shadows.shadowOf(host.getApplication()).denyPermissions(android.Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        manager.setVisible(false); manager.install("123"); idle(manager);
+        assertEquals("storage_permission", events.get(events.size() - 1).optString("reason"));
+        assertEquals("error", events.get(events.size() - 1).optString("status"));
+        manager.setVisible(true); manager.install("123"); idle(manager);
+        assertEquals("permission", events.get(events.size() - 1).optString("status"));
+    }
     @Test public void completedApkSurvivesDeniedPermissionAndInstallerCancellation() throws Exception {
         List<JSONObject> events = new CopyOnWriteArrayList<>(); AppUpdates manager = updater(events);
         manager.install("123"); idle(manager);

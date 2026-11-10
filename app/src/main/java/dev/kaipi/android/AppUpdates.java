@@ -128,7 +128,11 @@ final class AppUpdates implements AutoCloseable {
         }
         if (Build.VERSION.SDK_INT <= 28 && activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             emit("permission", "storage_permission", -1);
-            activity.runOnUiThread(() -> { if (!closed && visible) activity.requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, STORAGE_PERMISSION); });
+            activity.runOnUiThread(() -> {
+                if (closed) return;
+                if (visible) activity.requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, STORAGE_PERMISSION);
+                else submit(() -> fail("storage_permission"));
+            });
             return;
         }
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(release.url))
