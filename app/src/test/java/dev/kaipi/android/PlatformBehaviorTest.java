@@ -91,7 +91,7 @@ public class PlatformBehaviorTest {
         assertNotNull(source);
         Shadows.shadowOf(host.getContentResolver()).registerInputStreamSupplier(source, () -> new ByteArrayInputStream(new byte[42]));
         PackageInfo apk = new PackageInfo(); apk.packageName = host.getPackageName(); apk.versionName = "0.3.0";
-        apk.versionCode = 3; apk.signatures = new Signature[]{new Signature("abcdef")};
+        apk.versionCode = host.getPackageManager().getPackageInfo(host.getPackageName(), 0).versionCode; apk.signatures = new Signature[]{new Signature("abcdef")};
         Shadows.shadowOf(host.getPackageManager()).setPackageArchiveInfo(new File(host.getCacheDir(), "updates/release.apk").getAbsolutePath(), apk);
         manager.close();
         AppUpdates restored = updater(events);
