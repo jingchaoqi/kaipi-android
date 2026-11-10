@@ -29,6 +29,7 @@ parser.add_argument('--port', type=int, default=8765)
 parser.add_argument('--seed', action='store_true', help='Seed a branching conversation for screenshots/tests')
 parser.add_argument('--first-run', action='store_true')
 parser.add_argument('--delay-ready', type=float, default=0)
+parser.add_argument('--retry-fixture', action='store_true', help='Simulate retryable failures for GUI integration tests')
 args = parser.parse_args()
 temporary = tempfile.TemporaryDirectory(prefix='kaipi-preview-')
 cwd = Path(temporary.name)
@@ -51,9 +52,20 @@ def publish(event):
 
 class FixtureProvider:
     model = 'openai/gpt-5.6'
+    def __init__(self): self.failed = set()
     def count_tokens(self, text): return len(text)//2
     def complete(self, system, messages, cache_points):
         time.sleep(.55)
+        if args.retry_fixture:
+            question = next((b['text'] for m in reversed(messages) if m['role']=='user' for b in (m['content'] if isinstance(m['content'],list) else []) if b.get('type')=='text' and not b['text'].startswith('<kaipi:')), '')
+            tool_result = any(b.get('type')=='tool_result' for b in messages[-1]['content'])
+            if question.startswith(('retry-tool','retry-stop')) and not tool_result:
+                return Reply(content=[{'type':'tool_use','id':'fixture-tool','name':'bash','input':{'command':'printf PREVIOUS_TOOL_OUTPUT'}}],stop_reason='tool_use',usage=Usage(output=3))
+            if question.startswith(('retry-once','retry-tool')) and question not in self.failed:
+                self.failed.add(question)
+                raise ConnectionError('Preview connection interrupted')
+            if 'FROZEN_BROWSER_ATTACHMENT' in json.dumps(messages):
+                return Reply(content=[{'type':'text','text':'RETRY_ATTACHMENT_OK'}],stop_reason='end_turn',usage=Usage(output=4))
         if 'xss-probe' in json.dumps(messages):
             return Reply(content=[{'type':'text','text':'<img src=x onerror="window.__injected=1"><button data-branch="a">bad</button> [unsafe](javascript:alert(1)) ![image](https://example.invalid/tracker)'}], stop_reason='end_turn', usage=Usage(output=50))
         return Reply(content=[{'type':'text','text': '可以。先把问题拆成清晰的步骤，再逐步实现。\n\n### 从当前思路继续\n\n- 保留已经验证的结论。\n- 为不确定的部分开启独立探索。\n- 把有价值的发现嫁接回来。\n\n这样既能保持上下文清晰，也能让每一步都可以回溯。'}], stop_reason='end_turn', usage=Usage(input_uncached=328,output=112))

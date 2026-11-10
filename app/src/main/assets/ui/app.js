@@ -14,6 +14,7 @@ let lastFocus = null, pointerPan = null, pendingAppearance = null;
 const pendingRequests = new Map();
 let onboardingStep = null, chosenLanguage = null, pendingPreferences = null, preferenceWrite = null;
 let providerSelection = null, providerDrafts = new Map(), providerEpoch = 0;
+let activeSubmission = null;
 
 function request(op, body = {}) {
   if (!connected) return Promise.reject(new Error(uiText('本地引擎尚未连接，请稍候或重新连接。')));
@@ -39,7 +40,7 @@ function rejectPending(text) {
 function receive(json) {
   let message;
   try { message = typeof json === 'string' ? JSON.parse(json) : json; } catch { return; }
-  if (message.id === 'reconnect') { connected = true; stateReceived(message.result); $('connection').hidden = true; return; }
+  if (message.id === 'reconnect') { connected = true; if (!message.result?.busy) { live = null; sending = false; } stateReceived(message.result); $('connection').hidden = true; return; }
   if (message.id && pendingRequests.has(String(message.id))) {
     const task = pendingRequests.get(String(message.id)); pendingRequests.delete(String(message.id)); clearTimeout(task.timer);
     if (message.error) task.reject(new Error(message.error)); else task.resolve(message.result);
@@ -51,11 +52,12 @@ function receive(json) {
       break;
     case 'ready':
       if (message.protocol !== 1) return disconnected(uiText('运行时版本不兼容，请更新应用。'));
-      connected = true; $('connection').hidden = true; stateReceived(message.data); break;
+      connected = true; live = null; sending = false; activeSubmission = null; $('connection').hidden = true; stateReceived(message.data); break;
     case 'settled': {
       const error = live && live.error;
+      if (activeSubmission) activeSubmission.settled = true;
       live = null; sending = false; stateReceived(message.data);
-      if (error) toast(error);
+      if (error && !unfinishedAttempt()) toast(error);
       break;
     }
     case 'turn': turnEvent(message.data); break;
@@ -70,7 +72,9 @@ function receive(json) {
   }
 }
 function disconnected(text) {
-  connected = false; sending = false; rejectPending(text); updateComposer();
+  connected = false; sending = false; activeSubmission = null; rejectPending(text); updateComposer();
+  if (live) live.phase = uiText('连接已中断，请重新连接检查结果。');
+  if (state) renderHistory();
   $('connection').hidden = false; $('connection').className = 'connection error';
   toast(uiText(text));
   $('connection').innerHTML = uiHtml`<span>引擎连接中断</span><button id="retry-engine">重新连接</button>`;
@@ -85,12 +89,16 @@ function stateReceived(next) {
   if (!next || !next.nodes) return;
   const changed = state && next.session !== state.session;
   const follow = nearBottom() || !state || changed;
-  if (changed) { saveDraft(); live = null; sending = false; selected = null; collapsed.clear(); }
+  if (changed) { saveDraft(); live = null; sending = false; activeSubmission = null; selected = null; collapsed.clear(); }
   if (pendingAppearance && connected) {
     const value = pendingAppearance; pendingAppearance = null; next.appearance = value;
     request('appearance', value).catch(error => { pendingAppearance = value; fail(error); });
   }
   state = next;
+  if (next.busy && !live && next.latest_attempt) {
+    const attempt = next.latest_attempt;
+    live = {text:attempt.input,content:[],phase:uiText('任务仍在运行…'),retryTarget:attempt.parent_id !== next.leaf ? next.leaf : null};
+  }
   reconcilePreferences(next.preferences);
   if (next.appearance) KaipiTheme.apply(next.appearance);
   if (changed || !lastFocus) {
@@ -145,10 +153,23 @@ function contentHTML(content) {
   return html;
 }
 function assistantMeta(label, id) { return `<div class="assistant-meta"><span class="assistant-mark">${brandImage()}</span><strong>kaipi</strong>${id ? `<button class="node-link" data-node="${esc(id)}">${esc(label)} ${icon('tree')}</button>` : uiText('<span class="soft-label">正在思考</span>')}</div>`; }
+function unfinishedAttempt() {
+  const attempt = state?.latest_attempt;
+  return attempt && !live && !sending && !state.busy && ['aborted','tombstone'].includes(attempt.status) && attempt.parent_id === state.leaf && !state.history.some(t=>t.id===attempt.id) ? attempt : null;
+}
+function retryControl(attempt, prominent = false) {
+  if (!state.retryable || attempt.id !== state.latest_attempt?.id) return '';
+  return `<button type="button" data-retry-turn="${esc(attempt.id)}" class="${prominent ? 'retry-button' : 'icon-button'}" ${!connected || sending || state.busy ? 'disabled' : ''} aria-label="${uiText('重新运行上一轮')}" title="${uiText('使用当前模型重新运行上一轮')}">${icon('refresh')}${prominent ? uiText('重试') : ''}</button>`;
+}
+function unfinishedHTML(attempt) {
+  return `<article class="turn unfinished-turn" data-turn="${esc(attempt.id)}"><div class="turn-question"><div class="question-bubble">${esc(attempt.input || uiText('未完成的请求'))}</div></div>${assistantMeta(attempt.label,attempt.id)}<div class="retry-panel" role="status"><div class="retry-heading">${icon('refresh')}<strong>${uiText('这轮未完成')}</strong></div><p>${uiText(state.retryable ? '可以从原始问题重新运行，旧尝试保留在树中。' : '当前状态无法重试，可在树中查看此轮。')}</p>${attempt.attachments ? `<span class="retry-attachment">${icon('paperclip')}${uiText('原附件会一并恢复。')}</span>` : ''}${state.turn_error ? `<details class="retry-details"><summary>${uiText('查看原因')}</summary><pre>${esc(uiText(state.turn_error))}</pre></details>` : ''}${attempt.content.length ? `<details class="retry-details"><summary>${uiText('查看本次输出')}</summary>${contentHTML(attempt.content)}</details>` : ''}<div class="retry-footer">${retryControl(attempt,true)}<span class="retry-model">${uiText('当前模型')} · ${esc(state.status?.model || state.model)}</span><button type="button" class="retry-tree icon-button" data-node="${esc(attempt.id)}" aria-label="${uiText('在上下文树中查看')}">${icon('tree')}</button></div></div></article>`;
+}
 function renderHistory() {
   if (!state) return;
   const openTools = new Set([...$('messages').querySelectorAll('details[open] summary code')].map(n => n.textContent));
-  $('messages').innerHTML = state.history.map(turn => uiHtml`<article class="turn" data-turn="${esc(turn.id)}"><div class="turn-question"><div class="question-bubble">${esc(turn.input)}</div></div>${assistantMeta(turn.label, turn.id)}${contentHTML(turn.content)}${turn.status === 'aborted' ? uiText('<div class="turn-aborted">已停止，此节点不进入后续上下文。</div>') : ''}<div class="turn-actions"><button class="icon-button" data-copy-turn="${esc(turn.id)}" aria-label="复制回答">${icon('copy')}</button><button class="icon-button" data-branch="${esc(turn.id)}" aria-label="从这里探索">${icon('branch')}</button><button class="icon-button" data-node="${esc(turn.id)}" aria-label="在上下文树中查看">${icon('tree')}</button><span class="turn-cost">${M.tokens(M.usageTotal(turn.usage))} tokens${turn.cost > 0 ? ` · $${turn.cost.toFixed(4)}` : ''}</span></div></article>`).join('');
+  $('messages').innerHTML = state.history.filter(turn=>turn.id!==live?.retryTarget).map(turn => uiHtml`<article class="turn" data-turn="${esc(turn.id)}"><div class="turn-question"><div class="question-bubble">${esc(turn.input)}</div></div>${assistantMeta(turn.label, turn.id)}${contentHTML(turn.content)}${turn.status === 'aborted' ? uiText('<div class="turn-aborted">此轮未完成，不进入后续上下文。</div>') : ''}<div class="turn-actions"><button class="icon-button" data-copy-turn="${esc(turn.id)}" aria-label="复制回答">${icon('copy')}</button>${retryControl(turn)}<button class="icon-button" data-branch="${esc(turn.id)}" aria-label="从这里探索">${icon('branch')}</button><button class="icon-button" data-node="${esc(turn.id)}" aria-label="在上下文树中查看">${icon('tree')}</button><span class="turn-cost">${M.tokens(M.usageTotal(turn.usage))} tokens${turn.cost > 0 ? ` · $${turn.cost.toFixed(4)}` : ''}</span></div></article>`).join('');
+  const unfinished = unfinishedAttempt();
+  if (unfinished) $('messages').insertAdjacentHTML('beforeend',unfinishedHTML(unfinished));
   $('messages').querySelectorAll('details').forEach(d => { if (openTools.has(d.querySelector('summary code')?.textContent)) d.open = true; });
   decorateCode($('messages'));
   if (live) renderLive();
@@ -165,21 +186,21 @@ function renderLive() {
   const follow = nearBottom();
   let article = $('live-turn');
   if (!article) { article = document.createElement('article'); article.id = 'live-turn'; article.className = 'turn'; $('messages').append(article); }
-  article.innerHTML = `<div class="turn-question"><div class="question-bubble">${esc(live.text)}</div></div>${assistantMeta('', '')}<div class="live-content">${contentHTML(live.content)}</div><div class="live-phase" role="status"><span class="pulse-dot"></span><span class="busy-shimmer">${esc(live.phase || uiText('正在思考…'))}</span></div>`;
+  article.innerHTML = `<div class="turn-question"><div class="question-bubble">${esc(live.text)}</div></div>${assistantMeta('', '')}<div class="live-content">${contentHTML(live.content)}</div><div class="live-phase" role="status">${connected ? '<span class="pulse-dot"></span>' : ''}<span class="${connected ? 'busy-shimmer' : ''}">${esc(live.phase || uiText('正在思考…'))}</span></div>`;
   decorateCode(article);
   if (follow) scrollBottom(false);
 }
 function turnEvent(event) {
   if (!live) live = {text: '', content: [], phase: '', error: ''};
   switch (event.kind) {
-    case 'start': if (state) state.busy = true; break;
+    case 'start': if (state) state.busy = true; if (event.text) live.text = event.text; break;
     case 'text': live.content.push({kind: 'text', text: event.text}); break;
     case 'cmd': live.content.push({kind: 'cmd', text: event.text}); live.phase = uiText('正在执行命令'); break;
     case 'out': live.content.push({kind: 'out', text: event.text}); break;
     case 'phase': live.phase = uiText(event.text); break;
     case 'wait': live.phase = event.text; break;
     case 'error': live.error = event.text; live.phase = uiText('正在保存会话'); break;
-    case 'aborted': live.phase = uiText('已停止，正在保存'); break;
+    case 'aborted': live.error = event.text || ''; live.phase = uiText('正在保存会话'); break;
     case 'completed': live.phase = uiText('正在整理上下文'); break;
     case 'guard': toast(uiText('探索分支修改了工作区文件。请检查变更后再继续。')); break;
     case 'summary_failed': toast(uiText('摘要暂不可用，本次将使用节点问答。')); break;
@@ -219,16 +240,54 @@ async function send(event) {
   if (!text && !attachments.length) return;
   if (!state.configured) { toast(uiText('先连接一个模型，让对话开始。')); openSettings(); return; }
   const submitted = {text, attachments: attachments.slice(), explore};
+  const ticket = {}; activeSubmission = ticket;
   sending = true; updateComposer();
   live = {text: text || submitted.attachments.map(a => a.name).join('、'), content: [], phase: uiText('正在准备上下文')};
-  $('welcome').hidden = true; renderLive(); scrollBottom();
+  $('welcome').hidden = true; renderHistory(); scrollBottom();
   try {
     await request('turn', submitted);
+    if (activeSubmission !== ticket) return;
     if ($('draft').value.trim() === text) { $('draft').value = ''; attachments = []; resizeDraft(); renderAttachments(); saveDraft(); }
   } catch (error) {
-    sending = false; live = null; renderHistory(); updateComposer(); fail(error);
-    request('state').then(stateReceived).catch(() => {});
+    if (activeSubmission !== ticket || ticket.settled) return;
+    await reconcileTurnRequest(ticket);
+    if (activeSubmission === ticket && !ticket.settled) fail(error);
   }
+}
+async function reconcileTurnRequest(ticket) {
+  if (live) { live.phase = uiText('正在确认运行状态…'); renderLive(); }
+  try {
+    const next = await request('state');
+    if (activeSubmission !== ticket || ticket.settled) return;
+    sending = false;
+    if (!next.busy) live = null;
+    stateReceived(next);
+  } catch {
+    if (activeSubmission === ticket && !ticket.settled) disconnected(uiText('无法确认运行状态，请重新连接。'));
+  }
+}
+async function retryLatest() {
+  if (sending || state?.busy) return;
+  if (!connected) return toast(uiText('本地引擎尚未连接，请稍候或重新连接。'));
+  if (!state?.retryable || !state.latest_attempt) return;
+  if (!state.configured) { toast(uiText('先连接一个模型，让对话开始。')); openSettings(); return; }
+  const attempt = state.latest_attempt;
+  const submit = async () => {
+    if (!connected || sending || state?.busy || !state?.retryable || state.latest_attempt?.id !== attempt.id) throw new Error(uiText('会话状态已变化，请重新确认。'));
+    const ticket = {}; activeSubmission = ticket;
+    sending = true;
+    live = {text:attempt.input,content:[],phase:uiText('正在重新准备上下文'),retryTarget:attempt.id};
+    updateComposer(); renderHistory(); scrollBottom();
+    try { await request('retry'); }
+    catch (error) {
+      if (activeSubmission !== ticket || ticket.settled) return;
+      await reconcileTurnRequest(ticket);
+      if (activeSubmission === ticket && !ticket.settled) throw error;
+    }
+  };
+  if (attempt.has_tools || attempt.status === 'tombstone') {
+    confirmDialog(uiText('重新运行上一轮？'), uiText('本轮可能已执行工具操作。重试会使用当前模型重新开始，已有文件改动不会自动撤销。'), uiText('重新运行'), submit);
+  } else { try { await submit(); } catch (error) { fail(error); } }
 }
 async function mutate(op, body = {}, message = '') {
   const result = await request(op, body);
@@ -270,7 +329,7 @@ function renderTree() {
   }
   stage.innerHTML = `<svg aria-hidden="true">${edges}</svg>` + [...positions].map(([id, p]) => {
     const n = p.node, isCurrent = id === state.leaf;
-    return `<div style="position:absolute;left:${p.x * zoom}px;top:${p.y * zoom}px;transform:scale(${zoom});transform-origin:0 0;width:170px;height:83px"><button class="tree-node ${isCurrent ? 'current' : ''} ${selected === id ? 'selected' : ''} ${trunkIds.has(id) ? '' : 'off-trunk'} ${esc(n.status)}" data-tree-node="${esc(id)}" aria-label="${esc(n.label)} ${esc(n.input)}${isCurrent ? uiText('，当前位置') : ''}" aria-pressed="${selected === id}"><span class="tree-node-top"><span class="node-number">${esc(n.label)}</span>${id === state.trunk ? uiHtml`<span class="node-pin">${icon('pin')}主干</span>` : `<span>${n.status === 'archived' ? uiText('已归档') : n.status === 'aborted' ? uiText('已停止') : trunkIds.has(id) ? uiText('主干路径') : uiText('探索')}</span>`}</span><span class="tree-node-title">${esc(n.input || uiText('未完成的回合'))}</span><span class="tree-node-bottom"><span>${M.tokens(n.ctx)} ctx</span>${isCurrent ? uiText('<span class="node-current">你在这里</span>') : `<span>${n.grafts.length ? uiHtml`↳ ${n.grafts.length} 嫁接` : M.tokens(n.own) + ' tokens'}</span>`}</span></button>${p.children ? uiHtml`<button class="node-collapse" data-collapse="${esc(id)}" aria-label="${collapsed.has(id) ? uiText('展开') : uiText('折叠')} ${esc(n.label)} 的子节点">${collapsed.has(id) ? '+' + p.children : '−'}</button>` : ''}</div>`;
+    return `<div style="position:absolute;left:${p.x * zoom}px;top:${p.y * zoom}px;transform:scale(${zoom});transform-origin:0 0;width:170px;height:83px"><button class="tree-node ${isCurrent ? 'current' : ''} ${selected === id ? 'selected' : ''} ${trunkIds.has(id) ? '' : 'off-trunk'} ${esc(n.status)}" data-tree-node="${esc(id)}" aria-label="${esc(n.label)} ${esc(n.input)}${isCurrent ? uiText('，当前位置') : ''}" aria-pressed="${selected === id}"><span class="tree-node-top"><span class="node-number">${esc(n.label)}</span>${id === state.trunk ? uiHtml`<span class="node-pin">${icon('pin')}主干</span>` : `<span>${n.status === 'archived' ? uiText('已归档') : n.status === 'aborted' ? uiText('未完成') : trunkIds.has(id) ? uiText('主干路径') : uiText('探索')}</span>`}</span><span class="tree-node-title">${esc(n.input || uiText('未完成的回合'))}</span><span class="tree-node-bottom"><span>${M.tokens(n.ctx)} ctx</span>${isCurrent ? uiText('<span class="node-current">你在这里</span>') : `<span>${n.grafts.length ? uiHtml`↳ ${n.grafts.length} 嫁接` : M.tokens(n.own) + ' tokens'}</span>`}</span></button>${p.children ? uiHtml`<button class="node-collapse" data-collapse="${esc(id)}" aria-label="${collapsed.has(id) ? uiText('展开') : uiText('折叠')} ${esc(n.label)} 的子节点">${collapsed.has(id) ? '+' + p.children : '−'}</button>` : ''}</div>`;
   }).join('');
   $('zoom-level').textContent = Math.round(zoom * 100) + '%';
 }
@@ -290,7 +349,7 @@ async function inspectNode(id, focus = true) {
   const n = state.nodes.find(n => n.id === id); if (!n) { $('inspector').hidden = true; return; }
   const s = state.session;
   $('inspector').hidden = false;
-  $('inspector').innerHTML = uiHtml`<div class="inspector-head"><span class="inspector-label">${esc(n.label)}<span>${n.status === 'live' ? (id === state.trunk ? uiText('主干') : uiText('探索节点')) : n.status === 'archived' ? uiText('已归档') : uiText('不进入上下文')}</span></span><button id="inspector-close" class="icon-button" aria-label="关闭节点详情">${icon('close')}</button></div><h3>${esc(n.input || uiText('未完成的回合'))}</h3><div class="inspector-content"><div class="markdown">${markdown(n.answer || uiText('这个回合没有保存最终回答。'))}</div></div><div class="inspector-stats"><span>${M.tokens(n.ctx)} 上下文 tokens</span><span>${n.cost > 0 ? '$' + n.cost.toFixed(4) : M.tokens(n.own) + ' tokens'}</span></div><div class="node-actions"><button class="primary" data-node-action="go" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('chat')}从这里继续</button><button data-node-action="explore" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('branch')}从这里探索</button><button data-node-action="graft" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('graft')}嫁接到当前上下文</button><button data-node-action="pin" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('pin')}设为主干</button></div><div class="secondary-actions"><button data-node-action="detail">${icon('more')}完整内容</button><button data-node-action="${n.status === 'archived' ? 'restore' : 'archive'}" ${state.busy || !['live','archived'].includes(n.status) ? 'disabled' : ''}>${icon('archive')}${n.status === 'archived' ? uiText('恢复分支') : uiText('归档分支')}</button><button data-node-action="rewind" ${state.busy ? 'disabled' : ''}>${icon('undo')}回退</button></div>`;
+  $('inspector').innerHTML = uiHtml`<div class="inspector-head"><span class="inspector-label">${esc(n.label)}<span>${n.status === 'live' ? (id === state.trunk ? uiText('主干') : uiText('探索节点')) : n.status === 'archived' ? uiText('已归档') : uiText('不进入上下文')}</span></span><button id="inspector-close" class="icon-button" aria-label="关闭节点详情">${icon('close')}</button></div><h3>${esc(n.input || uiText('未完成的回合'))}</h3><div class="inspector-content"><div class="markdown">${markdown(n.answer || uiText('这个回合没有保存最终回答。'))}</div></div><div class="inspector-stats"><span>${M.tokens(n.ctx)} 上下文 tokens</span><span>${n.cost > 0 ? '$' + n.cost.toFixed(4) : M.tokens(n.own) + ' tokens'}</span></div><div class="node-actions">${state.retryable && id === state.latest_attempt?.id ? `<button class="primary" data-node-action="retry" ${!connected || sending || state.busy ? 'disabled' : ''}>${icon('refresh')}${uiText('重新运行上一轮')}</button>` : ''}<button class="primary" data-node-action="go" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('chat')}从这里继续</button><button data-node-action="explore" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('branch')}从这里探索</button><button data-node-action="graft" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('graft')}嫁接到当前上下文</button><button data-node-action="pin" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('pin')}设为主干</button></div><div class="secondary-actions"><button data-node-action="detail">${icon('more')}完整内容</button><button data-node-action="${n.status === 'archived' ? 'restore' : 'archive'}" ${state.busy || !['live','archived'].includes(n.status) ? 'disabled' : ''}>${icon('archive')}${n.status === 'archived' ? uiText('恢复分支') : uiText('归档分支')}</button><button data-node-action="rewind" ${state.busy ? 'disabled' : ''}>${icon('undo')}回退</button></div>`;
   $('inspector-close').onclick = () => { selected = null; $('inspector').hidden = true; renderTree(); };
   if (focus) centerNode(id);
   try {
@@ -304,7 +363,8 @@ async function nodeAction(action) {
     if (action === 'go' || action === 'explore') {
       await mutate('go', {id}); explore = action === 'explore'; renderHeader(); updateComposer(); tree(false); $('draft').focus();
       toast(explore ? uiText('在这里开启探索，主干保持原位。') : uiText('已切换上下文，工作区文件保持原样。'));
-    } else if (action === 'graft') graftDialog(id);
+    } else if (action === 'retry') { if (id === state.latest_attempt?.id) { tree(false); await retryLatest(); } }
+    else if (action === 'graft') graftDialog(id);
     else if (action === 'pin') confirmDialog(uiText('把这条思路设为主干？'), uiText('下一次输入将从这个节点继续，主干可以修改工作区文件。已有的对话和其他分支会保留。'), uiText('设为主干'), async () => { await mutate('pin', {id}); explore = false; renderHeader(); updateComposer(); toast(uiText('已设为主干。')); });
     else if (action === 'archive') confirmDialog(uiText('归档这条分支？'), uiText('该节点及其子节点将移出上下文。历史和费用记录保留，随时可以恢复。'), uiText('归档分支'), () => mutate('archive', {id}, uiText('分支已归档，可开启「显示归档」找回。')));
     else if (action === 'restore') await mutate('restore', {id}, uiText('分支已恢复。'));
@@ -654,6 +714,8 @@ $('session-search').oninput = renderSessions;
 $('workspace').onclick = () => { if (window.Native?.workspaces) Native.workspaces(); else toast(uiText('本地工作区')); };
 $('sessions').onclick = async event => { const button = event.target.closest('[data-session]'); if (!button) return; try { saveDraft(); await mutate('resume', {id:button.dataset.session}); rail(false); } catch (error) { fail(error); } };
 $('messages').onclick = async event => {
+  const retry = event.target.closest('[data-retry-turn]');
+  if (retry && !retry.disabled) { if (retry.dataset.retryTurn === state.latest_attempt?.id) await retryLatest(); return; }
   const node = event.target.closest('[data-node]'), branch = event.target.closest('[data-branch]'), copyTurn = event.target.closest('[data-copy-turn]');
   if (node) inspectNode(node.dataset.node);
   if (branch) { selected = branch.dataset.branch; await nodeAction('explore'); }

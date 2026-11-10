@@ -50,8 +50,8 @@ class BridgeTests(unittest.TestCase):
         self.env.stop()
         os.chdir(self.old_cwd)
         self.temp.cleanup()
-    def turn(self, text='hello', explore=False):
-        self.app.dispatch('turn', {'text': text, 'explore': explore})
+    def operation(self, op, body):
+        self.app.dispatch(op, body)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             event = self.events.get(timeout=10)
@@ -59,6 +59,121 @@ class BridgeTests(unittest.TestCase):
                 self.assertFalse(event['data']['busy'])
                 return event['data']
         self.fail('turn did not settle')
+    def turn(self, text='hello', explore=False):
+        return self.operation('turn', {'text': text, 'explore': explore})
+    def retry(self):
+        return self.operation('retry', {})
+
+    def test_retry_success_uses_core_and_preserves_old_attempt(self):
+        from copy import deepcopy
+        class Recording(Echo):
+            def __init__(self): self.requests = []
+            def complete(self, system, messages, points):
+                self.requests.append(deepcopy(messages))
+                return super().complete(system, messages, points)
+        first = Recording()
+        self.app.session._provider = first
+        original = self.turn('original question')['leaf']
+        before = self.app.session.log.state.nodes[original].model_dump()
+        replacement = Recording()
+        replacement.model = 'test/selected-model'
+        self.app.session._provider = replacement
+        state = self.retry()
+        self.assertEqual(first.requests[0], replacement.requests[0])
+        self.assertNotEqual(original, state['leaf'])
+        self.assertIsNone(state['latest_attempt']['parent_id'])
+        self.assertEqual('test/selected-model',state['latest_attempt']['model'])
+        self.assertEqual(before,self.app.session.log.state.nodes[original].model_dump())
+        self.assertEqual(state['leaf'],state['trunk'])
+        self.assertTrue(state['retryable'])
+
+    def test_retry_failed_turn_restores_attachments_graft_and_exploration(self):
+        import base64
+        from copy import deepcopy
+        parent = self.turn('parent')['leaf']
+        source = self.turn('source',True)['leaf']
+        self.app.dispatch('go',{'id':parent})
+        self.app.dispatch('graft',{'id':source,'depth':'leaf'})
+        class Offline(Echo):
+            def __init__(self): self.requests = []
+            def complete(self, system, messages, points):
+                self.requests.append(deepcopy(messages))
+                if len(self.requests)==1:
+                    return Reply(content=[{'type':'tool_use','id':'old','name':'bash','input':{'command':'printf OLD_TOOL_RESULT'}}],stop_reason='tool_use',usage=Usage(output=2))
+                raise TimeoutError('model read timeout')
+        original = Offline()
+        self.app.session._provider = original
+        attachment = {'name':'note.txt','data':base64.b64encode(b'FROZEN_ATTACHMENT').decode()}
+        failed = self.operation('turn',{'text':'read [file1]','attachments':[attachment],'explore':True})
+        attempt = failed['latest_attempt']
+        self.assertTrue(failed['retryable'] and attempt['attachments'] and attempt['has_tools'])
+        self.assertEqual('aborted',attempt['status'])
+        self.assertIn('model read timeout',failed['turn_error'])
+        self.assertNotIn(attempt['id'],[turn['id'] for turn in failed['history']])
+        before = self.app.session.log.state.nodes[attempt['id']].model_dump()
+        class Replacement(Echo):
+            def complete(self, system, messages, points):
+                self.messages = deepcopy(messages)
+                return super().complete(system, messages, points)
+        replacement = Replacement()
+        self.app.session._provider = replacement
+        state = self.retry()
+        self.assertEqual(original.requests[0],replacement.messages)
+        self.assertIn('FROZEN_ATTACHMENT',str(replacement.messages))
+        self.assertNotIn('OLD_TOOL_RESULT',str(replacement.messages))
+        self.assertEqual(parent,state['latest_attempt']['parent_id'])
+        self.assertEqual(parent,state['trunk'])
+        self.assertEqual([],state['pending'])
+        self.assertEqual(before,self.app.session.log.state.nodes[attempt['id']].model_dump())
+
+    def test_retry_is_reserved_synchronously_and_can_stop(self):
+        old = self.turn()['leaf']
+        entered, release = threading.Event(), threading.Event()
+        class Blocked(Echo):
+            def complete(self, *args):
+                entered.set(); release.wait(5)
+                return Reply(content=[{'type':'tool_use','id':'stopped','name':'bash','input':{'command':'touch retry-must-not-exist'}}],stop_reason='tool_use',usage=Usage(output=2))
+        self.app.session._provider = Blocked()
+        self.app.dispatch('retry',{})
+        try:
+            self.assertTrue(self.app.session.busy and entered.wait(5))
+            with self.assertRaises(core.BusyError): self.app.dispatch('retry',{})
+            with self.assertRaises(core.BusyError): self.app.dispatch('new',{})
+            self.app.dispatch('stop',{})
+        finally:
+            release.set(); self.app.worker.join(5)
+        state = self.app.snapshot()
+        self.assertFalse(state['busy'])
+        self.assertEqual(old,state['trunk'])
+        self.assertEqual('aborted',state['latest_attempt']['status'])
+        self.assertTrue(state['retryable'])
+        self.assertFalse((self.cwd/'retry-must-not-exist').exists())
+
+    def test_retry_rejects_node_arguments_or_changed_context_without_mutation(self):
+        parent = self.turn('parent')['leaf']
+        latest = self.turn('latest')['leaf']
+        with self.assertRaises(ValueError): self.app.dispatch('retry',{'id':parent})
+        self.app.dispatch('go',{'id':parent})
+        self.assertFalse(self.app.snapshot()['retryable'])
+        before = self.app.session.log.path.read_bytes(),self.app.session.cursor_path.read_bytes()
+        with self.assertRaises(ValueError): self.app.dispatch('retry',{})
+        self.assertEqual(before,(self.app.session.log.path.read_bytes(),self.app.session.cursor_path.read_bytes()))
+        self.assertFalse(self.app.session.busy)
+        self.assertEqual(latest,self.app.snapshot()['latest_attempt']['id'])
+
+    def test_retry_survives_reload_after_preparation_failure(self):
+        providers.use_model('missing-provider','missing-model')
+        self.app.session._provider = None
+        state = self.turn('NEW ORIGINAL QUESTION')
+        self.assertEqual('NEW ORIGINAL QUESTION',state['latest_attempt']['input'])
+        self.assertEqual('aborted',state['latest_attempt']['status'])
+        self.app = Application(self.cwd,self.events.put)
+        self.app.session._provider = self.app.session._cheap = Echo()
+        self.assertTrue(self.app.snapshot()['retryable'])
+        self.assertEqual('NEW ORIGINAL QUESTION',self.app.snapshot()['latest_attempt']['input'])
+        state = self.retry()
+        self.assertEqual('NEW ORIGINAL QUESTION',state['history'][-1]['input'])
+        self.assertEqual('',state['turn_error'])
     def test_tree_operations_are_core_operations_and_survive_reload(self):
         root = self.turn()['leaf']
         main = self.turn('main path')['leaf']
@@ -108,7 +223,7 @@ class BridgeTests(unittest.TestCase):
         self.app.worker.join(5)
         events = []
         while not self.events.empty(): events.append(self.events.get())
-        self.assertTrue(any(e.get('data', {}).get('kind') == 'error' and 'endpoint failed' in e['data']['text'] for e in events))
+        self.assertTrue(any(e.get('data', {}).get('kind') == 'aborted' and 'endpoint failed' in e['data']['text'] for e in events))
     def test_configuration_never_returns_credentials(self):
         state = self.app.dispatch('provider.save', {'provider':'openai','url':'https://example.com/v1','key':'synthetic-test-secret','models':'first, second'})
         config = self.app.dispatch('configuration', {})

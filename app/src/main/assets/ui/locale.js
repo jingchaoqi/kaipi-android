@@ -1,6 +1,22 @@
 /* Translate UI literals only. Template substitutions (messages, code and names) stay intact. */
 (() => {
   const messages = {
+    '重新运行上一轮':'Run the last turn again', '使用当前模型重新运行上一轮':'Run the last turn again with the current model',
+    '重试上一轮不接受参数':'Retrying the last turn takes no arguments', '重试':'Retry',
+    '这轮未完成':'This turn did not finish', '未完成的请求':'Unfinished request',
+    '可以从原始问题重新运行，旧尝试保留在树中。':'Start again from the original question. The previous attempt stays in the tree.',
+    '当前状态无法重试，可在树中查看此轮。':'This turn cannot be retried in the current state. You can view it in the tree.',
+    '原附件会一并恢复。':'The original attachments will be included.', '查看原因':'View reason', '查看本次输出':'View this attempt’s output',
+    '当前模型':'Current model', '任务仍在运行…':'The task is still running…',
+    '正在重新准备上下文':'Preparing the original context', '会话状态已变化，请重新确认。':'The conversation changed. Check its state before retrying.',
+    '正在确认运行状态…':'Checking the task status…', '无法确认运行状态，请重新连接。':'The task status is unknown. Please reconnect.',
+    '连接已中断，请重新连接检查结果。':'Disconnected. Reconnect to check the result.',
+    '重新运行上一轮？':'Run the last turn again?', '重新运行':'Run again',
+    '本轮可能已执行工具操作。重试会使用当前模型重新开始，已有文件改动不会自动撤销。':'This turn may have run tools. Retrying starts again with the current model; existing file changes will remain.',
+    '此轮未完成，不进入后续上下文。':'This turn did not finish and is excluded from future context.', '未完成':'Unfinished',
+    '没有可重试的原始请求':'No original request is available to retry',
+    '会话位置或待嫁接内容已变化，无法重试上一轮':'The conversation position or pending grafts changed. The last turn cannot be retried.',
+    'a turn is running':'A turn is already running',
     '正在加载kaipi引擎':'Loading kaipi engine',
     '默认工作区':'Default workspace',
     '本地引擎启动失败，请重试。':'The kaipi engine could not start. Please retry. ',

@@ -36,6 +36,18 @@ kaipi Android 不得修改任何 kaipi 层的代码，只能原样引入上游�
 引擎状态和游标状态共用输入框上方固定高度的一行，加载结束不改变页面几何位置。
 官方 kaipi SVG 原样打包；Android launcher 的 VectorDrawable 使用同一组路径与圆形几何。
 
+## 重试
+
+普通发送和重试分别调用 core 的公开 `Session.start()`、`Session.start_retry()`，共享停止与事件生命周期。
+桥接仅接收无参数的 `retry` 请求；可用性来自 core 状态中的 `retryable`，不接受任意节点 ID。
+core 负责恢复原输入、附件及嫁接快照、保留主干或探索身份、验证会话位置并创建新的尝试。
+桥接不改游标、不拼接重试上下文、不重新解析附件，也不执行 CLI 命令。
+
+`latest_attempt` 只是最新尝试的展示数据；进程中断而只留下请求快照时，仍使用 core 的文本过滤函数展示原问题。
+失败或停止后保留恢复卡片；成功回答旁提供重跑操作，其他历史节点没有重试入口。
+重试使用当前模型，保留新草稿；可能执行过工具时先用应用内确认界面提示已有改动会保留。
+请求确认超时只同步执行状态，不自动重新发送；界面重连后依据 core 状态恢复。
+
 ## 构建
 
 需要 Linux、Python 3.11+、uv、Node.js、JDK 17+、Rust 1.90、Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973。构建目标 Android 8.0+，包含 arm64-v8a / x86_64。建议使用最新 Android System WebView。
@@ -59,10 +71,10 @@ CI 的 APK 检查会验证签名并比对该指纹，发现变化即失败；Git
 更新 core：
 
 ```sh
-python3 scripts/update-core.py v0.2.1
+python3 scripts/update-core.py v0.2.2
 ```
 
-当前引入 kaipi core **0.2.1**，固定上游 `4fccca669c006f01aa040cbff42c7598b6b4fb68`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
+当前引入 kaipi core **0.2.2**，固定上游 `c710df6ece355390e6debdc0cf54949ebef256e1`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
 安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内暂不提供 core 在线更新。
 
@@ -86,6 +98,7 @@ python3 scripts/test-android.py --suite full
 npx playwright install chromium
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
 ```
 
 可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
@@ -98,9 +111,9 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 
 ## 本次验证
 
-- 主机：9 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果。
+- 主机：14 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
 - 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
-- 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。本次 core 0.2.1 更新尚未重跑设备验收。
+- 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
 
 ## 当前限制

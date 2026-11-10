@@ -26,8 +26,8 @@ class Endpoint(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         requests.append(body)
-        if len(requests) == 1:
-            message = {'role':'assistant', 'content':None, 'tool_calls':[{'id':'shell','type':'function','function':{'name':'bash','arguments':json.dumps({'command':'printf GUI_CORE_OK'})}}]}
+        if body['messages'][-1]['role'] != 'tool':
+            message = {'role':'assistant', 'content':None, 'tool_calls':[{'id':'shell','type':'function','function':{'name':'bash','arguments':json.dumps({'command':"printf 'GUI_CORE_OK\\202'; printf '\\377' >&2"})}}]}
             finish = 'tool_calls'
         else:
             message = {'role':'assistant','content':'ANDROID_GUI_OK'}
@@ -63,10 +63,20 @@ try:
         snapshot = app.snapshot()
         assert not snapshot['busy'] and snapshot['leaf'], [event for event in events if event.get('data', {}).get('kind') == 'error']
         assert snapshot['history'][-1]['content'][-1]['text'] == 'ANDROID_GUI_OK'
-        assert any(item['kind']=='out' and 'GUI_CORE_OK' in item['text'] for item in snapshot['history'][-1]['content'])
+        assert any(item['kind']=='out' and 'GUI_CORE_OK\ufffd\n\ufffd' in item['text'] for item in snapshot['history'][-1]['content'])
         assert len(requests)==2
         assert any(message['role']=='tool' for message in requests[-1]['messages'])
         print('PASS: Android adapter → core → verified HTTPS → real shell → saved history',flush=True)
+        original = snapshot['leaf']
+        app.dispatch('retry',{})
+        app.worker.join(120)
+        assert not app.worker.is_alive(), 'retry did not settle'
+        retried = app.snapshot()
+        assert not retried['busy'] and retried['retryable']
+        assert retried['leaf'] != original and retried['latest_attempt']['parent_id'] is None
+        assert len(requests)==4 and requests[0]['messages']==requests[2]['messages']
+        assert app.session.log.state.nodes[original].completed
+        print('PASS: native retry restores original model request, preserves old attempt and handles non-UTF-8 output',flush=True)
         app.dispatch('appearance',{'mode':'dark','color':'indigo'})
         restored = Application(cwd,lambda event:None)
         assert restored.snapshot()['appearance']=={'mode':'dark','color':'indigo'}

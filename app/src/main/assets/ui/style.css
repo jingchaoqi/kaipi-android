@@ -86,3 +86,12 @@ body,.app,.main,.sidebar,.context-panel,.composer,.dialog,.tool,.tree-node{trans
 @media(max-width:800px){.dialog.onboarding-dialog[data-step=provider]{height:100vh;height:100dvh;padding-top:24px;padding-bottom:max(16px,env(safe-area-inset-bottom))}}
 .dialog:focus{outline:none}
 .field>textarea{resize:none}
+
+/* A quiet recovery surface; retry availability is supplied by core. */
+.retry-panel{padding:17px 19px;background:var(--surface);border:1px solid var(--line);border-radius:14px;animation:retry-appear .24s var(--ease)}
+.retry-heading{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:12px}.retry-heading>svg{width:16px;height:16px;color:var(--accent-text)}.retry-heading>strong{font-weight:600}
+.retry-panel>p{font-size:11px;line-height:1.8;color:var(--muted);margin:8px 0 13px}.retry-attachment{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--accent-text);margin:0 0 12px}.retry-attachment>svg{width:13px;height:13px}
+.retry-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.retry-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:8px 15px;background:var(--selected);border:1px solid var(--border-accent);border-radius:9px;color:var(--accent-text);font-size:11px;transition:background .18s,border-color .18s,transform .18s}.retry-button>svg{width:14px;height:14px}.retry-button:hover{background:var(--light-green);border-color:var(--accent-text)}.retry-button:active{transform:scale(.97)}.retry-button:disabled{opacity:.45;cursor:default}.retry-model{font-size:10px;color:var(--muted);overflow-wrap:anywhere;min-width:0;flex:1}.retry-tree{margin-left:auto;color:var(--muted)}
+.retry-details{border-top:1px solid var(--line);margin:0 0 12px;padding-top:10px;font-size:10px;color:var(--muted)}.retry-details>summary{cursor:pointer;line-height:1.8}.retry-details>pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow:auto;font-size:10px;line-height:1.7;margin:8px 0 0;color:var(--muted)}.retry-details>.markdown{font-size:12px}
+@keyframes retry-appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media(max-width:800px){.retry-panel{padding:16px}.retry-button{min-height:40px}.retry-heading{font-size:13px}.retry-panel>p{font-size:12px}.retry-model{font-size:10px}}
