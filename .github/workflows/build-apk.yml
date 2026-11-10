@@ -74,13 +74,15 @@ jobs:
           npx playwright install --with-deps chromium
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 
       - name: Build Android runtime
         run: python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
 
       - name: Build and check APK
         run: |
-          ./gradlew --no-daemon :app:assembleDebug :app:lintDebug
+          ./gradlew --no-daemon :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
           python3 tests/test_runtime_package.py
 
       - name: Prepare download

@@ -1,6 +1,6 @@
 Metadata-Version: 2.5
 Name: kaipi
-Version: 0.2.0
+Version: 0.2.2
 Summary: A tiny, token-frugal coding agent that organises exploration as a DAG.
 License-Expression: MIT
 License-File: LICENSE

@@ -46,9 +46,30 @@ class Application:
     def event(self, event: core.Event) -> None:
         if event.kind == 'start':
             self.turn_error = ''
-        if event.kind == 'error':
+        if event.kind == 'error' or (event.kind == 'aborted' and event.text):
             self.turn_error = event.text
         self.publish({'event': 'turn', 'data': asdict(event)})
+
+    def turn_view(self, node: Any) -> dict[str, Any]:
+        # Crash records can contain only a saved request. Let core filter its display text.
+        shown = node.model_copy(update={'payload': [node.request.input]}) if not node.payload and node.request else node
+        return {'id': node.id, 'parent_id': node.parent_id, 'label': self.session.log.state.label(node.id),
+                'input': context.user_input(shown), 'status': node.status, 'content': transcript(node),
+                'attachments': context.has_attachments(shown), 'has_tools': bool(context.tool_calls(node)),
+                'model': node.model, 'usage': node.usage.model_dump(),
+                'cost': self.session.pricing.price(node.model).cost(node.usage)}
+
+    def start_turn(self, text: str = '', *, explore: bool = False, retry: bool = False) -> dict[str, bool]:
+        # These public core methods reserve execution before returning.
+        worker = self.session.start_retry(self.event) if retry else self.session.start(text, self.event, explore=explore)
+
+        def settled() -> None:
+            worker.join()
+            self.publish({'event': 'settled', 'data': self.snapshot()})
+
+        self.worker = threading.Thread(target=settled, daemon=True)
+        self.worker.start()
+        return {'accepted': True}
 
     def snapshot(self) -> dict[str, Any]:
         s = self.session
@@ -56,12 +77,9 @@ class Application:
             data = s.state()
             state, leaf = s.log.state, s.leaf
             data['name'] = core.session_title(state)
-            data['history'] = [
-                {'id': n.id, 'label': state.label(n.id), 'input': context.user_input(n),
-                 'status': n.status, 'content': transcript(n), 'usage': n.usage.model_dump(),
-                 'cost': s.pricing.price(n.model).cost(n.usage)}
-                for n in graph.lineage(state, leaf) if n.payload
-            ] if leaf else []
+            data['history'] = [self.turn_view(n) for n in graph.lineage(state, leaf) if n.payload] if leaf else []
+            latest = next(reversed(state.nodes.values()), None)
+            data['latest_attempt'] = self.turn_view(latest) if latest else None
             data['sessions'] = []
             for path in reversed(list_sessions(s.cwd)):
                 log = s.log if path == s.log.path else Log(path)
@@ -123,6 +141,10 @@ class Application:
         if op == 'stop':
             s.stop()
             return {'stopping': s.busy}
+        if op == 'retry':
+            if body:
+                raise ValueError('重试上一轮不接受参数')
+            return self.start_turn(retry=True)
         if op == 'turn':
             s.require_idle()
             plain = str(body.get('text', ''))
@@ -132,30 +154,7 @@ class Application:
             text = core.input_text(plain, items)
             if not text.strip() and not body.get('attachments'):
                 raise ValueError('写下问题，再发送。')
-            entered = threading.Event()
-
-            def forward(event: core.Event) -> None:
-                if event.kind == 'start':
-                    entered.set()
-                self.event(event)
-
-            def work() -> None:
-                try:
-                    core.run_input(s, text, forward, explore=bool(body.get('explore')))
-                except Exception as error:
-                    from kaipi.agent import Interrupted
-                    if not isinstance(error, Interrupted):
-                        self.event(core.Event('error', providers.redact(str(error))))
-                finally:
-                    entered.set()
-                    self.publish({'event': 'settled', 'data': self.snapshot()})
-
-            # core.run_input claims the core's busy state before emitting start.
-            # Wait for that reservation before accepting another pipe request.
-            self.worker = threading.Thread(target=work, daemon=True)
-            self.worker.start()
-            entered.wait()
-            return {'accepted': True}
+            return self.start_turn(text, explore=bool(body.get('explore')))
         if op == 'node':
             with s.lock:
                 node = s.log.state.nodes[s.resolve(str(body['id']))]
