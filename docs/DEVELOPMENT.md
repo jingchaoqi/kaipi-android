@@ -76,7 +76,15 @@ python3 scripts/update-core.py v0.2.2
 
 当前引入 kaipi core **0.2.2**，固定上游 `c710df6ece355390e6debdc0cf54949ebef256e1`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
-安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内暂不提供 core 在线更新。
+安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内「检查更新」更新的是整个 Android release APK，core 随 APK 原样更新，不独立在线替换。
+
+## 平台体验
+
+- 官方图标来自 kaipi `c710df6ece355390e6debdc0cf54949ebef256e1` 的 `docs/assets/kaipi-logo*.svg`，UI 与 README 原样复制；桌面 vector 保留同一几何和探索分支渐变，仅增加底色与留白。
+- 前台窗口在任一工作区仍有对话运行时设置 `FLAG_KEEP_SCREEN_ON`；发送等待确认也计入。完成、失败、取消确认、引擎断开/关闭后解除。点击停止本身不视为已终止；退到后台立即清除窗口标志，返回时按真实状态恢复。不申请 CPU wake lock，也不主动唤醒已被用户关闭的屏幕。
+- 更新独立于 core，读取 GitHub `releases/latest`，只选择稳定 release 的唯一 APK。按数字版本比较；Downloads 下载由系统 DownloadManager 管理，记录 APK asset ID、大小和摘要对应的下载 ID。重复点击、Activity 重建、安装授权被拒绝或取消安装均复用这条记录；失败/丢失/损坏文件才重新下载。
+- 安装前复制到私有临时缓存，验证 release 摘要（如有）、大小、包名、版本和当前应用的签名，并通过只读 FileProvider URI 交给系统安装器。Downloads 原文件保留。Android 8/9 需要公开 Downloads 写入权限；安装未知来源应用的授权由系统完成，授权后返回继续安装。
+- 更新界面、进度与错误使用应用内对话框并支持中英/主题；下载由系统继续，不在后台主动弹出安装器。
 
 ## 验证与预览
 
@@ -84,6 +92,7 @@ python3 scripts/update-core.py v0.2.2
 npm test
 sh scripts/test-host.sh
 python3 tests/test_runtime_package.py
+./gradlew :app:testDebugUnitTest
 # 在已启动的 APK 中验证 Android CPython、TLS、本地 shell、Git 与会话：
 python3 scripts/test-android.py
 # 完整协议 / 拒绝不可信证书测试（包含 Anthropic SDK）：
@@ -99,6 +108,7 @@ npx playwright install chromium
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 ```
 
 可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
@@ -110,6 +120,8 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
 ```
 
 ## 本次验证
+
+- 平台新增：20 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
 - 主机：14 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
 - 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
@@ -134,6 +146,7 @@ CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交�
 
 本项目原创代码采用 [MIT 许可证](../LICENSE)，许可证副本随 APK 打包在 `licenses/kaipi-android.txt`。
 第三方组件保留各自的版权声明与许可证，不因本项目采用 MIT 而改变。
+用于安全共享安装包的 AndroidX FileProvider 及其运行依赖采用 Apache 2.0，许可证和组件说明随 APK 的 `licenses/AndroidX.txt` 打包。
 上游 kaipi 许可证见 [vendor/kaipi/LICENSE](../vendor/kaipi/LICENSE)。
 CPython、Git 及其他依赖的许可证保存在 APK 的 `licenses/` 与各 Python 发行元数据中。
 Git 使用 GPLv2；发布 APK 时需履行对应源码提供义务。

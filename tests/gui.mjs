@@ -111,6 +111,13 @@ try {
   assert.equal(await page.locator('.question-bubble').first().textContent(),originalQuestion);
   assert.ok((await page.textContent('#tree-toggle')).includes('Context'));
   await page.click('#sidebar-close');
+  // The keyboard crosses the short-screen breakpoint without moving the title.
+  const titleY = (await page.locator('#rename').boundingBox()).y;
+  await page.locator('#draft').focus();
+  await page.setViewportSize({width:390,height:520});
+  assert.equal((await page.locator('#rename').boundingBox()).y,titleY);
+  await page.setViewportSize({width:390,height:844});
+  assert.equal((await page.locator('#rename').boundingBox()).y,titleY);
   // A narrow viewport and a raised keyboard must keep the composer accessible.
   await page.setViewportSize({width:320,height:520});
   await page.waitForTimeout(100);

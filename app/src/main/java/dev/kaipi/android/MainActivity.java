@@ -16,15 +16,17 @@ import java.util.concurrent.*;
 public final class MainActivity extends Activity {
     private WebView web;
     private volatile LocalCore core;
-    private boolean destroyed;
+    private boolean destroyed, visible, screenAwake;
     private int generation;
     private String workspace;
     private SharedPreferences prefs;
+    private AppUpdates updates;
     private final ExecutorService files = Executors.newSingleThreadExecutor();
     private final Map<String, LocalCore> engines = new HashMap<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        updates = new AppUpdates(this, stateValue -> platformEvent("update", stateValue));
         prefs = getSharedPreferences("tabs", MODE_PRIVATE);
         workspace = prefs.getString("active", "");
         try { UUID.fromString(workspace); } catch (IllegalArgumentException error) { workspace = UUID.randomUUID().toString(); }
@@ -60,6 +62,16 @@ public final class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("https://app.kaipi.invalid/index.html");
     }
+    private void updateScreenAwake() {
+        boolean awake = visible && !destroyed && engines.values().stream().anyMatch(LocalCore::isRunning);
+        if (awake == screenAwake) return;
+        screenAwake = awake;
+        if (awake) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+    @Override protected void onStart() { super.onStart(); visible = true; updates.setVisible(true); updateScreenAwake(); }
+    @Override protected void onStop() { visible = false; updates.setVisible(false); updateScreenAwake(); super.onStop(); }
+    @Override protected void onResume() { super.onResume(); updates.resumed(); }
     private void deliver(String json) {
         runOnUiThread(() -> { if (!destroyed) web.evaluateJavascript("window.kaipi.receive(" + JSONObject.quote(json) + ")", null); });
     }
@@ -74,13 +86,16 @@ public final class MainActivity extends Activity {
         LocalCore existing = engines.get(id);
         if (existing != null) { core = existing; core.send("{\"id\":\"reconnect\",\"op\":\"state\"}"); return; }
         LocalCore engine = new LocalCore(new LocalCore.Listener() {
+            public void activityChanged() { runOnUiThread(() -> { if (!destroyed) updateScreenAwake(); }); }
             public void message(String json) { runOnUiThread(() -> { if (!destroyed && workspace.equals(id)) deliver(json); }); }
             public void failed(String message) { runOnUiThread(() -> { if (!destroyed && workspace.equals(id)) platformEvent("disconnected", message); }); }
         });
-        engines.put(id, engine); core = engine;
+        engines.put(id, engine); core = engine; updateScreenAwake();
         engine.start(getApplicationContext(), new File(getFilesDir(), "workspaces/" + id));
     }
     public final class Bridge {
+        @JavascriptInterface public void checkUpdates() { updates.check(); }
+        @JavascriptInterface public void installUpdate(String asset) { updates.install(asset); }
         @JavascriptInterface public void ready() { runOnUiThread(() -> connect(workspace)); }
         @JavascriptInterface public void request(String json) {
             if (json.length() > 56 * 1024 * 1024) return;
@@ -133,6 +148,10 @@ public final class MainActivity extends Activity {
             try { UUID.fromString(id); connect(id); } catch (IllegalArgumentException ignored) { }
         }); }
     }
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == AppUpdates.STORAGE_PERMISSION) updates.storageResult(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+    }
     @Override protected void onActivityResult(int request, int result, Intent intent) {
         super.onActivityResult(request, result, intent);
         if (request != 10 || result != RESULT_OK || intent == null) return;
@@ -172,7 +191,7 @@ public final class MainActivity extends Activity {
         web.evaluateJavascript("window.kaipi.back()", result -> { if ("false".equals(result)) finish(); });
     }
     @Override protected void onDestroy() {
-        destroyed = true; files.shutdownNow();
+        destroyed = true; updateScreenAwake(); updates.close(); files.shutdownNow();
         for (LocalCore engine : engines.values()) engine.close();
         web.removeJavascriptInterface("Native"); web.destroy();
         super.onDestroy();

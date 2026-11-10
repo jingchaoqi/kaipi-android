@@ -15,6 +15,7 @@ const pendingRequests = new Map();
 let onboardingStep = null, chosenLanguage = null, pendingPreferences = null, preferenceWrite = null;
 let providerSelection = null, providerDrafts = new Map(), providerEpoch = 0;
 let activeSubmission = null;
+let updateState = null;
 
 function request(op, body = {}) {
   if (!connected) return Promise.reject(new Error(uiText('本地引擎尚未连接，请稍候或重新连接。')));
@@ -69,6 +70,7 @@ function receive(json) {
       fileSession = null; break;
     case 'fileError': toast(message.data); break;
     case 'workspaces': workspaceDialog(message.data); break;
+    case 'update': updateReceived(message.data); break;
   }
 }
 function disconnected(text) {
@@ -384,6 +386,46 @@ function showDialog(title, html, wide = false) {
   $('dialog-close').onclick = closeDialog;
   $('app').inert = true;
   requestAnimationFrame(() => { const target = $('dialog').querySelector('input:not([type=radio]),textarea') || $('dialog'); target.focus({preventScroll:true}); });
+}
+function updateReceived(next) {
+  updateState = next;
+  if (!$('overlay').hidden && $('dialog').classList.contains('update-dialog')) renderUpdate();
+  else if (next.status === 'ready') toast(uiText('更新已下载，可在检查更新中继续安装。'));
+}
+function openUpdates() {
+  showDialog(uiText('检查更新'), '');
+  $('dialog').classList.add('update-dialog');
+  updateState = {status:'checking'};
+  renderUpdate();
+  if (window.Native?.checkUpdates) Native.checkUpdates();
+  else updateReceived({status:'error',reason:'android_only'});
+}
+function renderUpdate() {
+  const value = updateState || {status:'checking'};
+  const titles = {checking:'正在检查更新',available:'新版本，已就绪',current:'已是最新版本',downloading:'正在下载更新',verifying:'正在校验安装包',ready:'安装包已下载',permission:'还需要一步授权',installing:'继续完成安装',error:'暂时无法完成更新'};
+  const reasons = {
+    check_failed:'无法连接更新服务，请稍后重试。',rate_limited:'检查过于频繁，请稍后重试。',
+    invalid_release:'这个 release 的信息不完整，请稍后重试。',invalid_version:'无法识别 release 版本，请稍后重试。',
+    missing_apk:'最新 release 还没有 APK，请稍后再来。',ambiguous_apk:'最新 release 有多个 APK，暂时无法自动选择。',
+    download_failed:'下载未完成，请检查网络后重试。',download_paused:'正在等待网络恢复，下载会自动继续。',
+    storage_permission:'请允许将安装包保存到 Downloads，然后继续。',
+    install_permission:'请在系统设置中允许 kaipi 安装应用。返回后可继续使用已下载的安装包。',
+    verification_failed:'安装包校验未通过，请重新下载。',download_missing:'下载文件已被移除，请重新下载。',
+    installer_unavailable:'无法打开系统安装器，请稍后重试。',check_again:'版本信息已变化，请重新检查更新。',android_only:'请在 Android 应用中检查更新。',
+  };
+  const copy = {checking:'从 kaipi Android 的最新 release 获取版本。',available:'安装包将保存到 Downloads，已有对话与配置会保留。',current:'你正在使用最新发布的版本。',downloading:'安装包正在保存到 Downloads，关闭此窗口也会继续下载。',verifying:'正在确认安装包完整性与签名。',ready:'文件保存在 Downloads。再次安装会复用这份文件。',permission:'系统授权完成后，即可继续安装。',installing:'请在系统安装界面确认。取消后也可以回来继续安装。',error:'你可以稍后再试，对话与配置不受影响。'};
+  const progress = Math.max(0,Math.min(100,Number(value.progress)||0));
+  const busy = ['checking','downloading','verifying','permission','installing'].includes(value.status);
+  const oldFocus = document.activeElement?.id;
+  $('dialog').innerHTML = `<div class="dialog-header"><h2 id="dialog-title">${uiText('检查更新')}</h2><button id="dialog-close" class="icon-button" aria-label="${uiText('关闭对话框')}">${icon('close')}</button></div><div class="update-hero"><span class="update-mark">${brandImage()}</span><span class="overline">KAIPI ANDROID</span><h3>${uiText(titles[value.status]||titles.error)}</h3>${value.version ? `<div class="update-version">v${esc(value.version)}${value.size ? `<span> · ${(value.size/1048576).toFixed(1)} MB</span>` : ''}</div>` : ''}</div><p class="dialog-description update-copy" role="status">${uiText(reasons[value.reason] || copy[value.status] || copy.error)}</p>${value.status==='downloading' ? `<div class="update-progress" role="progressbar" aria-label="${uiText('下载进度')}" aria-valuemin="0" aria-valuemax="100" ${value.progress>=0 ? `aria-valuenow="${progress}"` : ''}><i style="width:${value.progress>=0?progress:25}%"></i></div><div class="update-download-note">${value.progress>=0?progress+'%':uiText('正在连接…')} · Downloads</div>` : ''}${value.installed ? `<p class="update-installed">${uiText('当前版本')} v${esc(value.installed)}</p>` : ''}<div class="dialog-footer"><button id="update-check" class="button" ${busy ? 'disabled' : ''}>${uiText('重新检查')}</button>${['available','ready'].includes(value.status) || value.status==='error'&&value.asset&&!['check_again','missing_apk','ambiguous_apk','invalid_release','invalid_version','check_failed','rate_limited'].includes(value.reason) ? `<button id="update-install" class="button primary">${icon('arrow')}${uiText(value.status==='ready' ? '安装已下载的 APK' : value.status==='error' ? '重试' : '下载并安装')}</button>` : ''}</div>`;
+  $('dialog-close').onclick = closeDialog;
+  $('update-check').onclick = openUpdates;
+  if ($('update-install')) $('update-install').onclick = () => {
+    const asset = value.asset;
+    updateState = {...value,status:'verifying',reason:''}; renderUpdate();
+    Native.installUpdate(asset);
+  };
+  if (oldFocus && $(oldFocus) && !$(oldFocus).disabled) $(oldFocus).focus({preventScroll:true});
 }
 function lastDialogFocus() { if ($('overlay').hidden) dialogFocus = document.activeElement; }
 function closeDialog() { if (onboardingStep) return; $('overlay').classList.remove('onboarding-overlay'); $('overlay').hidden = true; $('app').inert = false; if (dialogFocus?.isConnected) dialogFocus.focus({preventScroll:true}); }
@@ -709,7 +751,7 @@ $('sidebar-close').onclick = () => rail(false); $('scrim').onclick = () => rail(
 $('tree-toggle').onclick = () => tree(!$('app').classList.contains('tree-open'));
 $('tree-close').onclick = () => tree(false); $('welcome-tree').onclick = () => tree(true); $('cursor-chip').onclick = () => { tree(true); if (state?.leaf) inspectNode(state.leaf); };
 $('new-chat').onclick = async () => { try { saveDraft(); await mutate('new'); rail(false); $('draft').focus(); } catch (error) { fail(error); } };
-$('settings').onclick = openSettings; $('language-settings').onclick = openLanguageSettings; $('provider-reminder').onclick = openSettings; $('appearance-button').onclick = openAppearance; $('model-picker').onclick = openModelPicker; $('rename').onclick = renameDialog;
+$('update-settings').onclick = openUpdates; $('settings').onclick = openSettings; $('language-settings').onclick = openLanguageSettings; $('provider-reminder').onclick = openSettings; $('appearance-button').onclick = openAppearance; $('model-picker').onclick = openModelPicker; $('rename').onclick = renameDialog;
 $('session-search').oninput = renderSessions;
 $('workspace').onclick = () => { if (window.Native?.workspaces) Native.workspaces(); else toast(uiText('本地工作区')); };
 $('sessions').onclick = async event => { const button = event.target.closest('[data-session]'); if (!button) return; try { saveDraft(); await mutate('resume', {id:button.dataset.session}); rail(false); } catch (error) { fail(error); } };

@@ -9,8 +9,9 @@ import java.util.concurrent.*;
 
 /** One isolated core process per workspace. Pipes are private and carry UTF-8 JSON lines. */
 final class LocalCore implements AutoCloseable {
-    interface Listener { void message(String json); void failed(String message); }
+    interface Listener { void message(String json); void failed(String message); void activityChanged(); }
     private final Listener listener;
+    private final TurnActivity activity = new TurnActivity();
     private final ExecutorService writer = Executors.newSingleThreadExecutor();
     private volatile Process process;
     private volatile boolean closed;
@@ -49,7 +50,7 @@ final class LocalCore implements AutoCloseable {
                 Thread reader = new Thread(() -> read(process), "kaipi-core-events");
                 reader.setDaemon(true); reader.start();
             } catch (Exception error) {
-                if (!closed) listener.failed("本地引擎启动失败，请重试。" + error.getClass().getSimpleName());
+                if (!closed) failed("本地引擎启动失败，请重试。" + error.getClass().getSimpleName());
             }
         });
     }
@@ -57,13 +58,27 @@ final class LocalCore implements AutoCloseable {
         try (BufferedReader in = new BufferedReader(new InputStreamReader(child.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = in.readLine()) != null && !closed) {
-                new JSONObject(line); // stdout must remain a data protocol, never terminal output.
+                JSONObject message = new JSONObject(line); // stdout is a private data protocol.
+                String event = message.optString("event");
+                if ("turn".equals(event)) {
+                    String kind = message.getJSONObject("data").optString("kind");
+                    if ("start".equals(kind)) activity.started();
+                    else if ("completed".equals(kind) || "aborted".equals(kind) || "error".equals(kind)) activity.settled(false);
+                } else if ("ready".equals(event) || "settled".equals(event)) {
+                    activity.settled(message.getJSONObject("data").optBoolean("busy"));
+                } else if ("fatal".equals(event)) activity.settled(false);
+                if (message.has("id")) {
+                    JSONObject result = message.optJSONObject("result");
+                    activity.response(message.optString("id"), result != null && result.optBoolean("accepted"));
+                    if ("reconnect".equals(message.optString("id")) && result != null) activity.settled(result.optBoolean("busy"));
+                }
+                listener.activityChanged();
                 listener.message(line);
             }
             int exit = child.waitFor();
-            if (!closed) listener.failed("本地引擎已结束（" + exit + "），请重新连接。");
+            if (!closed) failed("本地引擎已结束（" + exit + "），请重新连接。");
         } catch (Exception error) {
-            if (!closed) listener.failed("与本地引擎的连接已断开，请重新连接。");
+            if (!closed) failed("与本地引擎的连接已断开，请重新连接。");
         }
     }
     void send(String json) {
@@ -72,10 +87,22 @@ final class LocalCore implements AutoCloseable {
             Process child = process;
             if (child == null || closed) return;
             try {
+                JSONObject request = new JSONObject(json);
+                String op = request.optString("op");
+                if ("turn".equals(op) || "retry".equals(op)) {
+                    activity.requested(request.optString("id"));
+                    listener.activityChanged();
+                }
                 OutputStream out = child.getOutputStream();
                 out.write((json + "\n").getBytes(StandardCharsets.UTF_8)); out.flush();
-            } catch (IOException error) { if (!closed) listener.failed("消息未能送达，请重新连接。"); }
+            } catch (Exception error) { if (!closed) failed("消息未能送达，请重新连接。"); }
         }); } catch (RejectedExecutionException ignored) { }
+    }
+    boolean isRunning() { return activity.isRunning(); }
+    private void failed(String message) {
+        activity.settled(false);
+        listener.activityChanged();
+        listener.failed(message);
     }
     void awaitClosed() {
         try { exited.await(12, TimeUnit.SECONDS); }
@@ -84,6 +111,7 @@ final class LocalCore implements AutoCloseable {
     @Override public synchronized void close() {
         if (closed) return;
         closed = true;
+        activity.settled(false); listener.activityChanged();
         Process child = process;
         writer.shutdownNow();
         if (child == null) { exited.countDown(); return; }
