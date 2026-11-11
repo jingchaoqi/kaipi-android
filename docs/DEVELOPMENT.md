@@ -36,6 +36,10 @@ kaipi Android 不得修改任何 kaipi 层的代码，只能原样引入上游�
 引擎状态和游标状态共用输入框上方固定高度的一行，加载结束不改变页面几何位置。
 官方 kaipi SVG 原样打包；Android launcher 的 VectorDrawable 使用同一组路径与圆形几何。
 
+## 应用层指令
+
+core 0.2.3 的 `app_instructions` 是可选的创建会话参数。Android 的普通桥接不传此参数，恢复会话时沿用 core 保存的完整指令快照；新建会话的继承和重试上下文均由 core 管理。旧日志缺少该字段时按上游默认值读取，不迁移或重写原始日志。此次升级不新增 Android 指令配置界面。
+
 ## 重试
 
 普通发送和重试分别调用 core 的公开 `Session.start()`、`Session.start_retry()`，共享停止与事件生命周期。
@@ -71,10 +75,10 @@ CI 的 APK 检查会验证签名并比对该指纹，发现变化即失败；Git
 更新 core：
 
 ```sh
-python3 scripts/update-core.py v0.2.2
+python3 scripts/update-core.py v0.2.3
 ```
 
-当前引入 kaipi core **0.2.2**，固定上游 `c710df6ece355390e6debdc0cf54949ebef256e1`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
+当前引入 kaipi core **0.2.3**，固定上游 `753f2df33330b7e339cab2d631580a15287b8523`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
 安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内「检查更新」更新的是整个 Android release APK，core 随 APK 原样更新，不独立在线替换。
 
@@ -126,7 +130,7 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
 
 - 平台新增：22 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
-- 主机：14 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
+- 主机：16 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
 - 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
 - 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。

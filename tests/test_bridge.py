@@ -64,6 +64,53 @@ class BridgeTests(unittest.TestCase):
     def retry(self):
         return self.operation('retry', {})
 
+    def test_legacy_session_reopens_without_rewriting_its_prompt_or_log(self):
+        original = self.turn('legacy question')
+        path = self.app.session.log.path
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        for row in rows:
+            if row['type'] == 'session_started': row.pop('app_instructions', None)
+        path.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows))
+        frozen = self.app.session.log.state.system_prompt
+        before = path.read_bytes()
+        (self.cwd / 'AGENTS.md').write_text('NEW PROJECT INSTRUCTIONS')
+        self.app = Application(self.cwd, self.events.put)
+        self.assertEqual(original['history'], self.app.snapshot()['history'])
+        self.assertEqual('', self.app.session.log.state.app_instructions)
+        self.assertEqual(frozen, self.app.session.log.state.system_prompt)
+        self.assertEqual(before, path.read_bytes())
+        self.app.session._provider = self.app.session._cheap = Echo()
+        continued = self.turn('continue the legacy session')
+        self.assertEqual(2, len(continued['history']))
+        self.assertEqual(frozen, self.app.session.log.state.system_prompt)
+
+    def test_shared_application_instructions_survive_android_new_retry_and_resume(self):
+        shared = core.Session(self.cwd, new=True, app_instructions='SHARED APPLICATION RULE')
+        shared.rename('Shared application')
+        shared._provider = shared._cheap = Echo()
+        core.run_input(shared, 'shared question')
+        path, frozen = shared.log.path, shared.log.state.system_prompt
+        before = path.read_bytes()
+        self.app = Application(self.cwd, self.events.put)
+        self.assertEqual(frozen, self.app.session.log.state.system_prompt)
+        self.assertEqual(before, path.read_bytes())
+        self.app.dispatch('new', {})
+        self.app.session.rename('Android continuation')
+        self.assertEqual('SHARED APPLICATION RULE', self.app.session.log.state.app_instructions)
+        systems = []
+        class Capture(Echo):
+            def complete(self, system, *args):
+                systems.append(system)
+                return super().complete(system, *args)
+        self.app.session._provider = self.app.session._cheap = Capture()
+        self.turn('new question')
+        self.retry()
+        self.assertEqual(2, len(systems))
+        self.assertTrue(all('SHARED APPLICATION RULE' in system for system in systems))
+        self.app.dispatch('resume', {'id': path.stem})
+        self.assertEqual(frozen, self.app.session.log.state.system_prompt)
+        self.assertEqual(before, path.read_bytes())
+
     def test_retry_success_uses_core_and_preserves_old_attempt(self):
         from copy import deepcopy
         class Recording(Echo):
