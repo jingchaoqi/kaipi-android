@@ -43,13 +43,17 @@ try {
   // A small quick flick opens; a held, short pull above returned to closed.
   await start();await move(32,160,12);await move(65,160,12);await end();
   await page.waitForTimeout(400);assert.equal(await opened(),true);await close();
-  await swipe(60,160,190);assert.equal(await opened(),false);
+  await swipe(60,160,190);await page.waitForTimeout(400);assert.equal(await opened(),true);await close();
+  await swipe(71,199,190);await page.waitForTimeout(400);assert.equal(await opened(),true);await close();
+  await swipe(72,160,190);assert.equal(await opened(),false);
+  await swipe(8,200,150);assert.equal(await opened(),false);
+  await swipe(8,250,150);assert.equal(await opened(),false);
   await swipe(8,500,150);assert.equal(await opened(),false);
   await swipe(20,160,1);assert.equal(await opened(),false);
 
   // Vertical input at the edge still scrolls the underlying conversation.
   await page.evaluate(()=>{const filler=document.createElement('div');filler.id='gesture-scroll-fixture';filler.style.height='2000px';document.getElementById('messages').append(filler);document.getElementById('scroll').scrollTop=0;});
-  await swipe(8,200,9,130);await page.waitForTimeout(150);
+  await swipe(60,190,61,120);await page.waitForTimeout(150);
   assert.equal(await opened(),false);
   assert.ok(await page.locator('#scroll').evaluate(node=>node.scrollTop>0));
   await page.evaluate(()=>document.getElementById('gesture-scroll-fixture').remove());
@@ -63,6 +67,15 @@ try {
   await page.setViewportSize({width:390,height:844});
   await start();await page.waitForTimeout(650);await move(140);await end();
   assert.equal(await opened(),false);
+
+  // Widening the edge band must not intercept model-button taps or drags.
+  const model=await page.locator('#model-picker').boundingBox();
+  assert.ok(model.x<72);
+  await swipe(Math.max(60,model.x+2),model.y+model.height/2,190,model.y+model.height/2);
+  assert.equal(await opened(),false);assert.equal(await dragging(),false);
+  await page.touchscreen.tap(model.x+4,model.y+model.height/2);await page.waitForSelector('#dialog [data-model]');
+  assert.equal(await page.textContent('#dialog-title'),'选择模型');
+  await page.click('#dialog-close');
 
   await page.click('#tree-toggle');await swipe(8,160,150);assert.equal(await dragging(),false);
   assert.equal((await page.evaluate(()=>exclusions)).at(-1),false);await page.click('#tree-close');
@@ -78,5 +91,5 @@ try {
   await swipe(8,160,180);assert.equal(await opened(),false);assert.equal(await dragging(),false);
   assert.equal((await page.evaluate(()=>exclusions)).at(-1),false);
   assert.deepEqual(errors,[]);
-  console.log('PASS: upper-left edge drag, finger tracking, flick, spring back, vertical scroll, region limits, multi-touch/cancel/resize, dialog/tree isolation, tap, reduced motion and wide layout.');
+  console.log('PASS: 72 × 200 upper-left edge bounds, finger tracking, flick, spring back, vertical scroll, model-button tap/drag, multi-touch/cancel/resize, dialog/tree isolation, reduced motion and wide layout.');
 } finally {await browser?.close();server.kill('SIGTERM');}

@@ -335,7 +335,7 @@ document.addEventListener('touchstart', event => {
   if (event.touches.length !== 1) { finishMenuDrag(false); return; }
   if (!canPullMenu()) return;
   const point = event.touches[0];
-  if (point.clientX < 0 || point.clientX >= 24 || point.clientY < 0 || point.clientY > innerHeight / 3) return;
+  if (point.clientX < 0 || point.clientX >= 72 || point.clientY < 0 || point.clientY >= Math.min(innerHeight,200)) return;
   const control = event.target.closest?.('input,textarea,select,[contenteditable],a,button,pre,code');
   if (control && control.id !== 'sidebar-toggle') return;
   menuDrag = {id:point.identifier,x:point.clientX,y:point.clientY,lastX:point.clientX,time:performance.now(),started:performance.now(),speed:0,width:$('sidebar').getBoundingClientRect().width,distance:0,locked:false};

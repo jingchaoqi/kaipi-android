@@ -71,8 +71,8 @@ public final class MainActivity extends Activity {
         List<android.graphics.Rect> regions = new ArrayList<>();
         if (enabled && surface.getWidth() > 0 && surface.getWidth() / density <= 800) {
             // Android allows at most 200 dp of exclusion per edge. Keep the rest for Back.
-            int height = Math.min(surface.getHeight() / 3, Math.round(200 * density));
-            if (height > 0) regions.add(new android.graphics.Rect(0, 0, Math.min(surface.getWidth(), Math.round(24 * density)), height));
+            int height = Math.min(surface.getHeight(), Math.round(200 * density));
+            if (height > 0) regions.add(new android.graphics.Rect(0, 0, Math.min(surface.getWidth(), Math.round(72 * density)), height));
         }
         surface.setSystemGestureExclusionRects(regions);
     }

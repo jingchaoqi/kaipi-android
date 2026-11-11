@@ -197,9 +197,15 @@ public class PlatformBehaviorTest {
             assertEquals(1, regions.size());
             android.graphics.Rect region = regions.get(0);
             assertEquals(0, region.left); assertEquals(0, region.top);
-            assertEquals(Math.round(24 * density), region.width());
-            assertTrue(region.height() <= surface.getHeight() / 3);
-            assertTrue(region.height() <= Math.round(200 * density));
+            assertEquals(Math.round(72 * density), region.width());
+            assertEquals(Math.round(200 * density), region.height());
+            surface.layout(0, 0, Math.round(390 * density), Math.round(500 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            assertEquals(Math.round(200 * density), surface.getSystemGestureExclusionRects().get(0).height());
+            surface.layout(0, 0, Math.round(50 * density), Math.round(150 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            assertEquals(surface.getWidth(), surface.getSystemGestureExclusionRects().get(0).width());
+            assertEquals(surface.getHeight(), surface.getSystemGestureExclusionRects().get(0).height());
             bridge.menuGesture(false); Shadows.shadowOf(Looper.getMainLooper()).idle();
             assertEquals(false, field(activity, "menuGesture"));
             MainActivity.updateMenuGestureExclusion(surface, false);
