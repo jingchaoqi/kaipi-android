@@ -16,7 +16,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / 'app/src/main/assets/runtime'
 sys.path.insert(0, str(RUNTIME))
-from core_bridge import Application
+from core_bridge import Application, android_instructions
 from kaipi import core, providers, graph
 from kaipi.model import Usage
 from kaipi.providers import Reply
@@ -63,6 +63,48 @@ class BridgeTests(unittest.TestCase):
         return self.operation('turn', {'text': text, 'explore': explore})
     def retry(self):
         return self.operation('retry', {})
+
+    def test_android_environment_is_injected_only_for_new_android_sessions(self):
+        self.assertEqual('', android_instructions(self.cwd))
+        original = self.turn('before upgrading')['session']
+        old_path = self.app.session.log.path
+        original_prompt, old_log = self.app.session.log.state.system_prompt, old_path.read_bytes()
+        with patch('core_bridge.sys.getandroidapilevel', return_value=34, create=True):
+            self.app = Application(self.cwd, self.events.put)
+            self.assertEqual(original_prompt, self.app.session.log.state.system_prompt)
+            self.assertEqual(old_log, old_path.read_bytes())
+            self.app.dispatch('new', {})
+            self.app.session.rename('Android environment')
+            prompt = self.app.session.log.state.system_prompt
+            self.assertIn('kaipi for Android', prompt)
+            self.assertIn('API 34', prompt)
+            self.assertIn('/system/bin/sh', prompt)
+            self.assertIn(str(self.cwd.resolve()), prompt)
+            self.assertIn(str(Path.home()), prompt)
+            self.assertIn(self.app.app_instructions, prompt)
+            self.assertEqual(self.app.app_instructions, self.app.session.log.state.app_instructions)
+            systems = []
+            class AndroidCapture(Echo):
+                def complete(self, system, *args):
+                    systems.append(system)
+                    return super().complete(system, *args)
+            self.app.session._provider = self.app.session._cheap = AndroidCapture()
+            self.turn('run on Android')
+            self.retry()
+            self.assertEqual([prompt, prompt], systems)
+            saved = self.app.session.log.path.read_bytes()
+            self.app = Application(self.cwd, self.events.put)
+            self.assertEqual(prompt, self.app.session.log.state.system_prompt)
+            self.assertEqual(saved, self.app.session.log.path.read_bytes())
+            self.app.dispatch('resume', {'id': original})
+            self.assertEqual(original_prompt, self.app.session.log.state.system_prompt)
+            self.assertEqual(old_log, old_path.read_bytes())
+            empty = self.cwd / 'fresh-workspace'
+            empty.mkdir()
+            subprocess.run(['git', 'init', '-q', str(empty)], check=True)
+            fresh = Application(empty, lambda event: None)
+            self.assertIn('kaipi for Android', fresh.session.log.state.system_prompt)
+            self.assertIn(str(empty.resolve()), fresh.session.log.state.app_instructions)
 
     def test_legacy_session_reopens_without_rewriting_its_prompt_or_log(self):
         original = self.turn('legacy question')
