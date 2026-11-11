@@ -36,6 +36,7 @@ public class WorkspaceFilesTest {
     private Downloads downloads;
     @Before public void setup() throws Exception {
         controller = Robolectric.buildActivity(Activity.class).setup(); host = controller.get();
+        ConversationActivity.update(false);
         workspace = UUID.randomUUID().toString(); root = WorkspaceStorage.root(host, workspace); assertTrue(root.mkdirs());
         delivery = new WorkspaceFiles(host, events::add);
         // Match the provider lifecycle; Robolectric gives each test a new app files directory.
@@ -111,6 +112,19 @@ public class WorkspaceFilesTest {
             assertNull(Shadows.shadowOf(web).getJavascriptInterface("Native"));
             assertEquals(FilePreviewActivity.url("index.html"),Shadows.shadowOf(web).getLastLoadedUrl());
         } finally {preview.pause().stop().destroy();}
+    }
+    @Test public void previewKeepsTheScreenAwakeOnlyForAnActiveForegroundConversation() throws Exception {
+        file("index.html","<h1>Preview</h1>");
+        Intent intent=new Intent(host,FilePreviewActivity.class).putExtra("workspace",workspace).putExtra("path","index.html").putExtra("appearance","{}");
+        ActivityController<FilePreviewActivity> preview=Robolectric.buildActivity(FilePreviewActivity.class,intent).setup();
+        int flag=android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+        try {
+            ConversationActivity.update(true);assertEquals(flag,preview.get().getWindow().getAttributes().flags & flag);
+            ConversationActivity.update(false);assertEquals(0,preview.get().getWindow().getAttributes().flags & flag);
+            preview.pause().stop();ConversationActivity.update(true);assertEquals(0,preview.get().getWindow().getAttributes().flags & flag);
+            preview.start().resume();assertEquals(flag,preview.get().getWindow().getAttributes().flags & flag);
+            ConversationActivity.update(false);assertEquals(0,preview.get().getWindow().getAttributes().flags & flag);
+        } finally {preview.pause().stop().destroy();ConversationActivity.update(false);}
     }
     @Test public void htmlImagesAndTextPreviewWhileOtherFormatsUseReadOnlySnapshots() throws Exception {
         for (String name : new String[]{"index.html","README.md","picture.png"}) {

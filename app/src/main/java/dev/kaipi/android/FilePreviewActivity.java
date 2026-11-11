@@ -26,6 +26,12 @@ public final class FilePreviewActivity extends Activity {
     private int ink, surface, accent;
     private String workspace, path;
     private TextView status;
+    private boolean visible, running;
+    private final java.util.function.Consumer<Boolean> conversationActivity = value -> { running = value; updateScreenAwake(); };
+    private void updateScreenAwake() {
+        if (visible && running) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private int color(JSONObject appearance, String key, String fallback) {
         String value = appearance.optString(key, fallback);
@@ -33,6 +39,7 @@ public final class FilePreviewActivity extends Activity {
     }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        ConversationActivity.observe(conversationActivity);
         JSONObject appearance;
         try { appearance = new JSONObject(getIntent().getStringExtra("appearance")); } catch (Exception error) { appearance = new JSONObject(); }
         english = appearance.optString("language").equals("en");
@@ -119,5 +126,7 @@ public final class FilePreviewActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == WorkspaceFiles.STORAGE_PERMISSION) delivery.permissionResult(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
     }
-    @Override protected void onDestroy() { if (delivery != null) delivery.close(); if (web != null) web.destroy(); super.onDestroy(); }
+    @Override protected void onStart() { super.onStart(); visible = true; updateScreenAwake(); }
+    @Override protected void onStop() { visible = false; updateScreenAwake(); super.onStop(); }
+    @Override protected void onDestroy() { ConversationActivity.remove(conversationActivity); if (delivery != null) delivery.close(); if (web != null) web.destroy(); super.onDestroy(); }
 }

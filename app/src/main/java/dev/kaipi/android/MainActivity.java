@@ -77,7 +77,9 @@ public final class MainActivity extends Activity {
         surface.setSystemGestureExclusionRects(regions);
     }
     private void updateScreenAwake() {
-        boolean awake = visible && !destroyed && engines.values().stream().anyMatch(LocalCore::isRunning);
+        boolean running = !destroyed && engines.values().stream().anyMatch(LocalCore::isRunning);
+        ConversationActivity.update(running);
+        boolean awake = visible && running;
         if (awake == screenAwake) return;
         screenAwake = awake;
         if (awake) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
