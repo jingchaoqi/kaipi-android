@@ -78,7 +78,7 @@ python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
 ./gradlew :app:assembleDebug :app:lintDebug
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.1，包名与开发签名保持兼容，可覆盖旧预览版安装。
+APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.2，包名与固定签名不变，可覆盖升级。
 
 版本策略：仅在用户明确指定时修改 `versionName` 和 `versionCode`。日常修改、提交与 Actions 构建均保持当前版本；Actions 的运行编号仅用于区分下载产物，不作为应用版本号。
 
@@ -143,10 +143,10 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 
 ## 本次验证
 
-- 平台新增：22 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
+- 平台：46 项 JVM/Robolectric 用例（44 通过，2 项按 Android API 条件跳过），覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝，以及文件路径边界、只读分享、Downloads 保存/失败清理、ZIP 资源保留、独立预览无桥接接口与亮屏状态。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
 - 主机：17 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
-- 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
+- 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、3 warnings。
 - 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
 
@@ -158,7 +158,6 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 - 文本草稿可跨重启恢复；附件草稿只在当前应用生命周期内保留。
 - 界面按模型回复更新文本，并非逐 token 输出。停止 bash 可快速生效，等待模型网络请求时可能要到请求返回才结束。
 - 尚需 arm64 真机、不同中文输入法、文件选择器及无障碍服务的交互验收。浏览器检查不能代替这些验收。
-- 预览版使用公开开发签名，不用于正式发行。
 
 CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交互测试、Android lint 和 APK 完整性检查，然后提供调试 APK。模拟器/真机验收单独执行。
 
