@@ -16,6 +16,8 @@ let onboardingStep = null, chosenLanguage = null, pendingPreferences = null, pre
 let providerSelection = null, providerDrafts = new Map(), providerEpoch = 0;
 let activeSubmission = null;
 let updateState = null;
+let menuDrag = null, menuDragFrame = 0, menuExclusion = null;
+const mobileMenu = matchMedia('(max-width:800px)');
 
 function request(op, body = {}) {
   if (!connected) return Promise.reject(new Error(uiText('本地引擎尚未连接，请稍候或重新连接。')));
@@ -298,6 +300,76 @@ async function mutate(op, body = {}, message = '') {
   return result;
 }
 function rail(open) { $('app').classList.toggle('rail-open', open); $('app').classList.toggle('rail-hidden', !open); $('sidebar-toggle').setAttribute('aria-expanded', String(open)); }
+function canPullMenu() {
+  return mobileMenu.matches && !document.hidden && !$('app').inert && $('overlay').hidden
+    && !$('app').classList.contains('rail-open') && !$('app').classList.contains('tree-open');
+}
+function syncMenuGesture() {
+  const enabled = canPullMenu();
+  if (!enabled && menuDrag) finishMenuDrag(false);
+  if (enabled !== menuExclusion) { menuExclusion = enabled; window.Native?.menuGesture?.(enabled); }
+}
+function paintMenuDrag() {
+  menuDragFrame = 0;
+  if (!menuDrag?.locked) return;
+  $('sidebar').style.transform = `translateX(${menuDrag.distance - menuDrag.width}px)`;
+  $('scrim').style.opacity = String(menuDrag.distance / menuDrag.width);
+}
+function finishMenuDrag(open) {
+  if (!menuDrag) return;
+  const dragged = menuDrag.locked;
+  if (menuDragFrame) { cancelAnimationFrame(menuDragFrame); menuDragFrame = 0; }
+  if (dragged) { paintMenuDrag(); $('sidebar').getBoundingClientRect(); }
+  menuDrag = null;
+  $('app').classList.remove('rail-dragging');
+  if (dragged) {
+    rail(open);
+    $('sidebar').style.removeProperty('transform');
+    $('scrim').style.removeProperty('opacity');
+    if (open) { document.activeElement?.blur(); $('new-chat').focus({preventScroll:true}); }
+  }
+}
+document.addEventListener('touchstart', event => {
+  if (event.touches.length !== 1) { finishMenuDrag(false); return; }
+  if (!canPullMenu()) return;
+  const point = event.touches[0];
+  if (point.clientX < 0 || point.clientX >= 24 || point.clientY < 0 || point.clientY > innerHeight / 3) return;
+  const control = event.target.closest?.('input,textarea,select,[contenteditable],a,button,pre,code');
+  if (control && control.id !== 'sidebar-toggle') return;
+  menuDrag = {id:point.identifier,x:point.clientX,y:point.clientY,lastX:point.clientX,time:performance.now(),started:performance.now(),speed:0,width:$('sidebar').getBoundingClientRect().width,distance:0,locked:false};
+}, {passive:true});
+document.addEventListener('touchmove', event => {
+  if (!menuDrag) return;
+  if (event.touches.length !== 1 || !canPullMenu() || !event.cancelable) { finishMenuDrag(false); return; }
+  const point = [...event.touches].find(touch => touch.identifier === menuDrag.id);
+  if (!point) { finishMenuDrag(false); return; }
+  const dx = point.clientX - menuDrag.x, dy = point.clientY - menuDrag.y, now = performance.now();
+  if (!menuDrag.locked) {
+    if (dx < -8 || Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx) || now - menuDrag.started > 600) { finishMenuDrag(false); return; }
+    if (dx < 10 || dx < Math.abs(dy) * 1.35) return;
+    menuDrag.locked = true;
+    $('app').classList.add('rail-dragging');
+  }
+  event.preventDefault();
+  menuDrag.speed = (point.clientX - menuDrag.lastX) / Math.max(1, now - menuDrag.time);
+  menuDrag.lastX = point.clientX; menuDrag.time = now;
+  menuDrag.distance = Math.max(0,Math.min(menuDrag.width,dx));
+  if (!menuDragFrame) menuDragFrame = requestAnimationFrame(paintMenuDrag);
+}, {passive:false});
+document.addEventListener('touchend', event => {
+  if (!menuDrag) return;
+  if (menuDrag.locked) event.preventDefault();
+  const open = menuDrag.locked && (menuDrag.distance >= menuDrag.width * .3
+    || menuDrag.distance >= 40 && menuDrag.speed > .35 && performance.now() - menuDrag.time < 120);
+  finishMenuDrag(open);
+}, {passive:false});
+document.addEventListener('touchcancel', () => finishMenuDrag(false), {passive:true});
+window.addEventListener('resize', () => { finishMenuDrag(false); syncMenuGesture(); });
+window.addEventListener('blur', () => finishMenuDrag(false));
+document.addEventListener('visibilitychange', syncMenuGesture);
+const menuUiObserver = new MutationObserver(syncMenuGesture);
+menuUiObserver.observe($('app'), {attributes:true,attributeFilter:['class','inert']});
+menuUiObserver.observe($('overlay'), {attributes:true,attributeFilter:['hidden']});
 function tree(open) {
   $('app').classList.toggle('tree-open', open);
   $('tree-toggle').setAttribute('aria-expanded', String(open));
@@ -810,6 +882,7 @@ window.kaipi = {receive, back};
 updateOnboarding();
 renderEngineStatus();
 if (matchMedia('(min-width:801px)').matches) rail(true);
+syncMenuGesture();
 if (window.Native) Native.ready();
 else disconnected(uiText('请在 Android 应用中打开，或连接本地开发预览。'));
 })();

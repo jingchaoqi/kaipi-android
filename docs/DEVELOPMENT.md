@@ -80,6 +80,8 @@ python3 scripts/update-core.py v0.2.2
 
 ## 平台体验
 
+- 窄屏可从左侧 24 CSS px、视口上方三分之一区域向右拉出菜单，跟手拖动并按距离/速度决定展开或回弹；纵向滑动、控件、长按和双指不会触发。弹窗、首次引导与上下文树打开时停用，取消/窗口尺寸变化/切后台时清理。Android 10+ 只在启用时为左上边缘设置系统手势排除区，遵守每侧最多 200 dp 的系统限制，其余边缘继续保留返回手势。
+
 - 官方图标来自 kaipi `c710df6ece355390e6debdc0cf54949ebef256e1` 的 `docs/assets/kaipi-logo*.svg`，UI 与 README 原样复制；桌面 vector 保留同一几何和探索分支渐变，仅增加底色与留白。
 - 前台窗口在任一工作区仍有对话运行时设置 `FLAG_KEEP_SCREEN_ON`；发送等待确认也计入。完成、失败、取消确认、引擎断开/关闭后解除。点击停止本身不视为已终止；退到后台立即清除窗口标志，返回时按真实状态恢复。不申请 CPU wake lock，也不主动唤醒已被用户关闭的屏幕。
 - 更新独立于 core，读取 GitHub `releases/latest`，只选择稳定 release 的唯一 APK。按数字版本比较；Downloads 下载由系统 DownloadManager 管理，记录 APK asset ID、大小和摘要对应的下载 ID。重复点击、Activity 重建、安装授权被拒绝或取消安装均复用这条记录；失败/丢失/损坏文件才重新下载。
@@ -109,6 +111,7 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
 ```
 
 可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
@@ -121,7 +124,7 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 
 ## 本次验证
 
-- 平台新增：21 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
+- 平台新增：22 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
 - 主机：14 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
 - 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。

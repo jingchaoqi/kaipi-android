@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 public final class MainActivity extends Activity {
     private WebView web;
     private volatile LocalCore core;
-    private boolean destroyed, visible, screenAwake;
+    private boolean destroyed, visible, screenAwake, menuGesture;
     private int generation;
     private String workspace;
     private SharedPreferences prefs;
@@ -60,7 +60,19 @@ public final class MainActivity extends Activity {
             }
         });
         setContentView(web);
+        web.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> updateMenuGestureExclusion(web, menuGesture));
         web.loadUrl("https://app.kaipi.invalid/index.html");
+    }
+    static void updateMenuGestureExclusion(android.view.View surface, boolean enabled) {
+        if (android.os.Build.VERSION.SDK_INT < 29) return;
+        float density = surface.getResources().getDisplayMetrics().density;
+        List<android.graphics.Rect> regions = new ArrayList<>();
+        if (enabled && surface.getWidth() > 0 && surface.getWidth() / density <= 800) {
+            // Android allows at most 200 dp of exclusion per edge. Keep the rest for Back.
+            int height = Math.min(surface.getHeight() / 3, Math.round(200 * density));
+            if (height > 0) regions.add(new android.graphics.Rect(0, 0, Math.min(surface.getWidth(), Math.round(24 * density)), height));
+        }
+        surface.setSystemGestureExclusionRects(regions);
     }
     private void updateScreenAwake() {
         boolean awake = visible && !destroyed && engines.values().stream().anyMatch(LocalCore::isRunning);
@@ -94,6 +106,10 @@ public final class MainActivity extends Activity {
         engine.start(getApplicationContext(), new File(getFilesDir(), "workspaces/" + id));
     }
     public final class Bridge {
+        @JavascriptInterface public void menuGesture(boolean enabled) { runOnUiThread(() -> {
+            if (destroyed) return;
+            menuGesture = enabled; updateMenuGestureExclusion(web, menuGesture);
+        }); }
         @JavascriptInterface public void checkUpdates() { updates.check(); }
         @JavascriptInterface public void installUpdate(String asset) { updates.install(asset); }
         @JavascriptInterface public void ready() { runOnUiThread(() -> connect(workspace)); }
