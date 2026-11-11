@@ -24,12 +24,15 @@ try {
   // A real touch drag must track the finger, even before opening the menu once.
   await start();await move(30);await move(52);
   assert.equal(await dragging(),true);
+  await page.waitForFunction(()=>Math.abs(document.getElementById('sidebar').getBoundingClientRect().x-(44-document.getElementById('sidebar').getBoundingClientRect().width))<2);
   const drawer=await page.locator('#sidebar').boundingBox();
   assert.ok(Math.abs(drawer.x-(44-drawer.width))<2,JSON.stringify(drawer));
   await page.waitForTimeout(150);await end();await page.waitForTimeout(400);
   assert.equal(await opened(),false);assert.equal(await dragging(),false);
   assert.equal(await page.locator('#sidebar').evaluate(node=>node.style.transform),'');
 
+  // Repeating a pull while the cancelled drawer is settling must not hit its buttons.
+  await start();await move(45);await page.waitForTimeout(150);await end();
   await swipe(8,160,150);await page.waitForTimeout(400);
   assert.equal(await opened(),true);
   assert.equal(await page.getAttribute('#sidebar-toggle','aria-expanded'),'true');

@@ -100,6 +100,8 @@ body,.app,.main,.sidebar,.context-panel,.composer,.dialog,.tool,.tree-node{trans
 .update-hero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:22px 0 14px;gap:12px}.update-mark{width:55px;height:55px;border:1px solid var(--line);border-radius:16px;background:var(--surface);display:grid;place-items:center}.update-mark .official-mark{width:36px;height:36px}.update-hero h3{font-family:var(--serif);font-size:24px;font-weight:400;margin:2px 0 0}.update-version{font-size:13px;color:var(--accent-text)}.update-version>span,.update-installed{font-size:10px;color:var(--muted)}.update-copy{text-align:center;min-height:42px;margin:6px 0 18px}.update-installed{text-align:center;margin:16px 0 0}.update-progress{height:4px;overflow:hidden;background:var(--line);border-radius:4px}.update-progress>i{display:block;height:100%;background:var(--accent-text);border-radius:4px;transition:width .25s var(--ease)}.update-download-note{text-align:center;font-size:10px;color:var(--muted);margin-top:10px}.update-dialog .dialog-footer{justify-content:center;flex-wrap:wrap}
 
 @media(max-width:800px){
+  .sidebar{pointer-events:none}
+  .rail-open .sidebar{pointer-events:auto}
   .scrim{display:block;position:fixed;inset:0;z-index:24;background:#26382245;visibility:hidden;opacity:0;pointer-events:none;transition:opacity .25s var(--ease),visibility 0s .25s}
   .rail-open .scrim{visibility:visible;opacity:1;pointer-events:auto;animation:none;transition-delay:0s}
   .rail-dragging .sidebar{margin-left:0;transition:none;will-change:transform}
