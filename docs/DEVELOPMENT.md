@@ -36,6 +36,12 @@ kaipi Android 不得修改任何 kaipi 层的代码，只能原样引入上游�
 引擎状态和游标状态共用输入框上方固定高度的一行，加载结束不改变页面几何位置。
 官方 kaipi SVG 原样打包；Android launcher 的 VectorDrawable 使用同一组路径与圆形几何。
 
+## 应用层指令
+
+core 0.2.3 的 `app_instructions` 是可选的创建会话参数。Android 通过此公开接口为首次工作区会话与显式新建的对话注入运行环境说明：Android/API/架构、本地执行、`/system/bin/sh`、Python/Git、工作区与 HOME，以及按实际工具结果判断可用能力。主机预览不注入 Android 说明。
+
+恢复已有会话时不传该参数，沿用 core 保存的完整指令快照，旧日志缺少该字段时按上游默认值读取，不迁移或重写原始日志。Android 的「开启新对话」使用公开的 `Session(cwd, new=True, app_instructions=...)` 创建当前 Android 环境的新快照；重试与切回旧会话继续使用各自冻结的指令。会话创建、空会话清理和保存仍由 core 执行。此次不新增指令配置界面。
+
 ## 重试
 
 普通发送和重试分别调用 core 的公开 `Session.start()`、`Session.start_retry()`，共享停止与事件生命周期。
@@ -47,6 +53,18 @@ core 负责恢复原输入、附件及嫁接快照、保留主干或探索身份
 失败或停止后保留恢复卡片；成功回答旁提供重跑操作，其他历史节点没有重试入口。
 重试使用当前模型，保留新草稿；可能执行过工具时先用应用内确认界面提示已有改动会保留。
 请求确认超时只同步执行状态，不自动重新发送；界面重连后依据 core 状态恢复。
+
+## 文件交付
+
+工作区仍位于应用私有的 `files/workspaces/<UUID>/`，不迁移旧数据。菜单「工作区文件」独立于 core 进程浏览目录；Markdown 相对文件链接及工作区内的 `file:` 链接由 Android 接管。新会话的应用层说明约定交付真实文件与相对 Markdown 链接，并说明 HTML 预览离线运行。
+
+`WorkspaceStorage` 限制路径和符号链接目标必须留在当前工作区，隐藏并拒绝 `.git`、`.kaipi` 内部数据。HTML、图片与文本使用独立的 `FilePreviewActivity`，其 WebView 无任何 JavascriptInterface，禁用 file/content 访问，只提供工作区资源；HTML 允许本地脚本，CSP 阻止网络资源、联网请求、嵌套页面和 Worker。外链须用户点击后交给系统浏览器。文本按内容转义展示，最大预览 2 MiB，大文件仍可保存、分享。
+
+PDF、Office、音视频等交给系统支持的应用打开。打开与分享先建立只读缓存快照，通过独立的 FileProvider 临时授予单个 URI 的读取权限，不公开工作区目录或 HOME。找不到支持的应用时给出保存提示。
+
+预览页面通过进程内的 `ConversationActivity` 订阅 Android 侧已有的回合活动状态：仅当前台仍有对话运行时亮屏，终态或切到后台立即解除。它不启动、重试或推断任何 core 回合。
+
+保存操作在 Android 10+ 使用 MediaStore Downloads，写入 `Downloads/kaipi`，完成后才公开条目，失败时删除未完成条目；Android 8/9 请求系统写入授权，显式创建新文件，重名自动编号。目录保存为 ZIP，保留相对路径，跳过符号链接与 core 内部目录。保存和分享均创建副本，不改动源文件或会话。
 
 ## 构建
 
@@ -60,7 +78,7 @@ python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
 ./gradlew :app:assembleDebug :app:lintDebug
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.1，包名与开发签名保持兼容，可覆盖旧预览版安装。
+APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.2，包名与固定签名不变，可覆盖升级。
 
 版本策略：仅在用户明确指定时修改 `versionName` 和 `versionCode`。日常修改、提交与 Actions 构建均保持当前版本；Actions 的运行编号仅用于区分下载产物，不作为应用版本号。
 
@@ -71,14 +89,16 @@ CI 的 APK 检查会验证签名并比对该指纹，发现变化即失败；Git
 更新 core：
 
 ```sh
-python3 scripts/update-core.py v0.2.2
+python3 scripts/update-core.py v0.2.3
 ```
 
-当前引入 kaipi core **0.2.2**，固定上游 `c710df6ece355390e6debdc0cf54949ebef256e1`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
+当前引入 kaipi core **0.2.3**，固定上游 `753f2df33330b7e339cab2d631580a15287b8523`。打包文件已与官方 release wheel 逐字节核对一致。脚本原样引入 wheel 和发行元数据，记录精确提交、许可证与依赖锁文件。更新后需重新构建运行时并验证桥接、Android 原生依赖和 APK。不要直接修改 `runtime/kaipi/`。
 
 安装新 APK 时，运行时代码根据内容摘要更新，HOME、工作区和 GUI 文本草稿保留。应用内「检查更新」更新的是整个 Android release APK，core 随 APK 原样更新，不独立在线替换。
 
 ## 平台体验
+
+- 窄屏可从应用内容区左上角宽 72 CSS px、高 200 CSS px 的区域向右拉出菜单，跟手拖动并按距离/速度决定展开或回弹；纵向滑动、控件、长按和双指不会触发，模型按钮正常接收点击。WebView 的标准 viewport 下 CSS px 对应 dp，Android 10+ 同步申请左上角宽 72 dp、高 200 dp 的系统手势排除区，两者均按当前视口尺寸裁剪，避免随屏高 1/3 变化而超出系统每侧 200 dp 的纵向上限。弹窗、首次引导与上下文树打开时停用，取消/窗口尺寸变化/切后台时清理，其余边缘继续保留返回手势。
 
 - 官方图标来自 kaipi `c710df6ece355390e6debdc0cf54949ebef256e1` 的 `docs/assets/kaipi-logo*.svg`，UI 与 README 原样复制；桌面 vector 保留同一几何和探索分支渐变，仅增加底色与留白。
 - 前台窗口在任一工作区仍有对话运行时设置 `FLAG_KEEP_SCREEN_ON`；发送等待确认也计入。完成、失败、取消确认、引擎断开/关闭后解除。点击停止本身不视为已终止；退到后台立即清除窗口标志，返回时按真实状态恢复。不申请 CPU wake lock，也不主动唤醒已被用户关闭的屏幕。
@@ -109,6 +129,8 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 ```
 
 可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
@@ -121,10 +143,10 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 
 ## 本次验证
 
-- 平台新增：21 项 JVM/Robolectric 测试通过，覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
+- 平台：46 项 JVM/Robolectric 用例（44 通过，2 项按 Android API 条件跳过），覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝，以及文件路径边界、只读分享、Downloads 保存/失败清理、ZIP 资源保留、独立预览无桥接接口与亮屏状态。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
-- 主机：14 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
-- 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、2 warnings。
+- 主机：17 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
+- 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、3 warnings。
 - 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。
 
@@ -136,7 +158,6 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 - 文本草稿可跨重启恢复；附件草稿只在当前应用生命周期内保留。
 - 界面按模型回复更新文本，并非逐 token 输出。停止 bash 可快速生效，等待模型网络请求时可能要到请求返回才结束。
 - 尚需 arm64 真机、不同中文输入法、文件选择器及无障碍服务的交互验收。浏览器检查不能代替这些验收。
-- 预览版使用公开开发签名，不用于正式发行。
 
 CI 在 push/PR 时构建双架构运行时，执行主机测试、浏览器交互测试、Android lint 和 APK 完整性检查，然后提供调试 APK。模拟器/真机验收单独执行。
 

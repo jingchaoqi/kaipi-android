@@ -6,8 +6,10 @@
     image(token) { return `<span>[图片：${escape(token.text)}]</span>`; },
     link(token) {
       const label = this.parser.parseInline(token.tokens);
-      // No executable schemes. The app copies links instead of navigating its WebView.
-      if (!/^(https?:\/\/|mailto:|[./#])/i.test(token.href)) return label;
+      // Local documents open through the Android file surface, never in the app WebView.
+      const local = token.href && !token.href.startsWith('#') && (!/^[a-z][a-z\d+.-]*:/i.test(token.href) || /^file:/i.test(token.href)) && !token.href.startsWith('//');
+      if (local) return `<a href="#" data-workspace-file="${escape(token.href)}">${label}</a>`;
+      if (!/^(https?:\/\/|mailto:|#)/i.test(token.href)) return label;
       return `<a href="${escape(token.href)}"${token.title ? ` title="${escape(token.title)}"` : ''}>${label}</a>`;
     },
   };

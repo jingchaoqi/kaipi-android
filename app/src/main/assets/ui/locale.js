@@ -1,6 +1,20 @@
 /* Translate UI literals only. Template substitutions (messages, code and names) stay intact. */
 (() => {
   const messages = {
+    '工作区文件':'Workspace files', '工作区':'Workspace', '文件路径':'File path', '刷新文件':'Refresh files',
+    '文件夹':'Folder', '分享文件':'Share file', '保存到 Downloads':'Save to Downloads',
+    '保存文件夹为 ZIP':'Save folder as ZIP', '正在读取文件…':'Reading files…',
+    '这里保存着当前工作区的文件。打开预览，或保存一份到 Downloads。':'Files in the current workspace. Open a preview or save a copy to Downloads.',
+    '这里还没有文件':'No files here yet', '让 kaipi 创建的文件，会出现在这里。':'Files created by kaipi will appear here.',
+    '文件保留在本机，保存与分享会创建副本。':'Files stay on this device. Saving and sharing create copies.',
+    '请在 Android 应用中打开工作区文件。':'Open workspace files in the Android app.',
+    '无法识别这个文件路径。':'This file path could not be read.', '无法读取这个目录。':'This folder could not be read.',
+    '正在保存文件…':'Saving the file…', '已保存到 Downloads。':'Saved to Downloads/kaipi.',
+    '无法打开文件。它可能已被移动，或不在当前工作区中。':'The file could not be opened. It may have moved or be outside this workspace.',
+    '无法分享这个文件。':'This file could not be shared.',
+    '没有可打开此文件的应用，请保存到 Downloads 后使用其他应用打开。':'No app is available to open this file. Save it to Downloads to use another app.',
+    '保存失败，请检查可用空间和文件是否存在。':'Saving failed. Check the free space and whether the file still exists.',
+    '请允许将文件保存到 Downloads，然后重试。':'Allow saving files to Downloads, then retry.',
     '检查更新':'Check for updates', '正在检查更新':'Checking for updates', '新版本，已就绪':'A new version is ready',
     '已是最新版本':'You are up to date', '正在下载更新':'Downloading the update', '正在校验安装包':'Verifying the APK',
     '安装包已下载':'Ready to install', '还需要一步授权':'One permission to continue', '继续完成安装':'Finish installing',

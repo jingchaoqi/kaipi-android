@@ -181,6 +181,40 @@ public class PlatformBehaviorTest {
     private static boolean awake(Activity activity) {
         return (activity.getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0;
     }
+    @Test @Config(sdk = 33) public void menuGestureExcludesOnlyTheEnabledUpperLeftRegion() throws Exception {
+        ActivityController<MainActivity> app = Robolectric.buildActivity(MainActivity.class).setup();
+        try {
+            MainActivity activity = app.get();
+            MainActivity.Bridge bridge = activity.new Bridge();
+            bridge.menuGesture(true); Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(true, field(activity, "menuGesture"));
+            // Robolectric's WebView has no renderer/layout. Exercise the inherited View API.
+            android.view.View surface = new android.view.View(activity);
+            float density = activity.getResources().getDisplayMetrics().density;
+            surface.layout(0, 0, Math.round(390 * density), Math.round(844 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            List<android.graphics.Rect> regions = surface.getSystemGestureExclusionRects();
+            assertEquals(1, regions.size());
+            android.graphics.Rect region = regions.get(0);
+            assertEquals(0, region.left); assertEquals(0, region.top);
+            assertEquals(Math.round(72 * density), region.width());
+            assertEquals(Math.round(200 * density), region.height());
+            surface.layout(0, 0, Math.round(390 * density), Math.round(500 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            assertEquals(Math.round(200 * density), surface.getSystemGestureExclusionRects().get(0).height());
+            surface.layout(0, 0, Math.round(50 * density), Math.round(150 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            assertEquals(surface.getWidth(), surface.getSystemGestureExclusionRects().get(0).width());
+            assertEquals(surface.getHeight(), surface.getSystemGestureExclusionRects().get(0).height());
+            bridge.menuGesture(false); Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(false, field(activity, "menuGesture"));
+            MainActivity.updateMenuGestureExclusion(surface, false);
+            assertTrue(surface.getSystemGestureExclusionRects().isEmpty());
+            surface.layout(0, 0, Math.round(1024 * density), Math.round(844 * density));
+            MainActivity.updateMenuGestureExclusion(surface, true);
+            assertTrue(surface.getSystemGestureExclusionRects().isEmpty());
+        } finally { app.pause().stop().destroy(); }
+    }
     public static class MissingDownloadProvider extends ContentProvider {
         public boolean onCreate() { return true; }
         public android.database.Cursor query(Uri uri, String[] projection, String selection, String[] args, String order) { return null; }

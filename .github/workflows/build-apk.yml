@@ -71,11 +71,14 @@ jobs:
           npm run assets
           npm test
           sh scripts/test-host.sh
-          npx playwright install --with-deps chromium
+          # The runner already has Chromium runtime libraries; avoid APT for optional fonts.
+          npx playwright install chromium
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 
       - name: Build Android runtime
         run: python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"

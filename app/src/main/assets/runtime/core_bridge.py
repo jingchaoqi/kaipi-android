@@ -6,6 +6,7 @@ No terminal, CLI, browser server or rendering module is imported here.
 from __future__ import annotations
 
 import json
+import platform
 import queue
 import signal
 import sys
@@ -20,6 +21,28 @@ from kaipi.store import Log, list_sessions
 
 PROTOCOL = 1
 MAX_REQUEST = 56 * 1024 * 1024
+
+
+def android_instructions(cwd: Path) -> str:
+    api_level = getattr(sys, 'getandroidapilevel', None)
+    if api_level is None:
+        return ''
+    return (
+        f'You are running inside kaipi for Android, locally on an Android device '
+        f'(API {api_level()}, {platform.machine()}).\n'
+        'The bash tool runs Android /system/bin/sh. The app bundles python/python3 and git; '
+        'other system utilities come from /system/bin. Do not assume GNU Bash, desktop package '
+        'managers, system services, sudo or root privileges are available.\n'
+        f'Workspace: {json.dumps(str(cwd.resolve()), ensure_ascii=False)}. '
+        f'App HOME: {json.dumps(str(Path.home()), ensure_ascii=False)}.\n'
+        'Filesystem access follows Android app permissions; network access depends on device '
+        'connectivity. Determine command, file and network availability from actual tool results.\n'
+        'For file deliverables, create the real files in the workspace and link to them in your reply '
+        'using relative Markdown links, for example [Open page](./index.html). The Android app can '
+        'preview workspace files and let the user share them or save copies to Downloads. '
+        'HTML previews are offline: keep pages self-contained or use relative workspace resources, not external CDNs. '
+        'Do not claim a file was saved to public Downloads unless a tool result confirms it.'
+    )
 
 
 def transcript(node: Any) -> list[dict[str, Any]]:
@@ -38,7 +61,9 @@ def transcript(node: Any) -> list[dict[str, Any]]:
 
 class Application:
     def __init__(self, cwd: Path, publish: Any) -> None:
-        self.session = core.Session(cwd)
+        self.app_instructions = android_instructions(cwd)
+        # Resume always keeps core's frozen snapshot. Only a fresh workspace gets new facts.
+        self.session = core.Session(cwd, app_instructions=self.app_instructions if not list_sessions(cwd) else None)
         self.publish = publish
         self.worker: threading.Thread | None = None
         self.turn_error = ''
@@ -171,7 +196,10 @@ class Application:
         with s.lock:
             s.require_idle()
             if op == 'new':
-                s.new()
+                if self.app_instructions:
+                    self.session = core.Session(s.cwd, new=True, app_instructions=self.app_instructions)
+                else:
+                    s.new()
                 self.turn_error = ''
             elif op == 'resume':
                 s.resume(str(body['id']))
