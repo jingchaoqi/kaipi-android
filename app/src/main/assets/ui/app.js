@@ -16,6 +16,7 @@ let onboardingStep = null, chosenLanguage = null, pendingPreferences = null, pre
 let providerSelection = null, providerDrafts = new Map(), providerEpoch = 0;
 let activeSubmission = null;
 let updateState = null;
+let workspaceBrowser = {request:0, path:''};
 let menuDrag = null, menuDragFrame = 0, menuExclusion = null;
 const mobileMenu = matchMedia('(max-width:800px)');
 
@@ -73,6 +74,7 @@ function receive(json) {
     case 'fileError': toast(message.data); break;
     case 'workspaces': workspaceDialog(message.data); break;
     case 'update': updateReceived(message.data); break;
+    case 'workspaceFiles': workspaceFilesReceived(message.data); break;
   }
 }
 function disconnected(text) {
@@ -761,13 +763,64 @@ function renameDialog() {
 }
 function workspaceDialog(items) {
   if (!items.length) return toast(uiText('当前只有一个本地工作区。'));
-  showDialog(uiText('本地工作区'), uiHtml`${items.map(w => `<button class="model-option" data-workspace="${esc(w.id)}">${icon('folder')}<span>${esc(w.is_default ? uiText('默认工作区') : w.name)}</span>${icon('right')}</button>`).join('')}`);
+  showDialog(uiText('本地工作区'), uiHtml`${items.map(w => `<button class="model-option" data-workspace="${esc(w.id)}">${icon('folder')}<span>${esc(w.is_default ? uiText('默认工作区') : w.name)}</span>${icon('right')}</button>`).join('')}<div class="dialog-footer"><button id="browse-workspace" class="button">${icon('folder')}${uiText('工作区文件')}</button></div>`);
+  $('browse-workspace').onclick = () => browseWorkspace('');
   $('dialog').querySelectorAll('[data-workspace]').forEach(button => button.onclick = () => {
     if (state?.busy) return toast(uiText('请先结束当前回合再切换工作区。'));
     saveDraft(); connected = false; rejectPending(uiText('正在切换工作区')); closeDialog();
     renderEngineStatus();
     Native.workspace(button.dataset.workspace);
   });
+}
+function previewAppearance() {
+  const style = getComputedStyle(document.documentElement);
+  return JSON.stringify({language:KaipiLocale.current().language, dark:document.documentElement.dataset.theme==='dark',
+    background:style.getPropertyValue('--bg').trim(), ink:style.getPropertyValue('--ink').trim(),
+    surface:style.getPropertyValue('--light-green').trim(), accent:style.getPropertyValue('--accent-text').trim()});
+}
+function openWorkspaceFile(path, link = false) {
+  if (!window.Native?.openWorkspaceFile) return toast(uiText('请在 Android 应用中打开工作区文件。'));
+  try {
+    // Markdown URLs encode spaces and Unicode; native resolution enforces the workspace boundary.
+    const value = !link || /^file:/i.test(path) ? path : decodeURIComponent(path.split(/[?#]/,1)[0]);
+    Native.openWorkspaceFile(value, previewAppearance());
+  } catch { toast(uiText('无法识别这个文件路径。')); }
+}
+function browseWorkspace(path = '') {
+  if (!window.Native?.listWorkspaceFiles) return toast(uiText('请在 Android 应用中打开工作区文件。'));
+  workspaceBrowser = {request:workspaceBrowser.request+1, path};
+  showDialog(uiText('工作区文件'), `<div class="workspace-file-loading" role="status"><span class="engine-sprout" aria-hidden="true"><i></i><i></i><i></i></span>${uiText('正在读取文件…')}</div>`);
+  $('dialog').classList.add('workspace-files-dialog');
+  Native.listWorkspaceFiles(String(workspaceBrowser.request), path);
+}
+function workspaceFilesReceived(value) {
+  if (value.status === 'directory') return browseWorkspace(value.data);
+  if (value.status === 'listed' || value.status === 'list_error') {
+    if (value.request !== String(workspaceBrowser.request) || $('overlay').hidden || !$('dialog').classList.contains('workspace-files-dialog')) return;
+    const data = value.status === 'listed' ? value.data : {path:workspaceBrowser.path, entries:[]};
+    workspaceBrowser.path = data.path;
+    const parts = data.path.split('/').filter(Boolean);
+    showDialog(uiText('工作区文件'), `<p class="dialog-description">${uiText('这里保存着当前工作区的文件。打开预览，或保存一份到 Downloads。')}</p><nav class="file-breadcrumbs" aria-label="${uiText('文件路径')}"><button data-directory="">${uiText('工作区')}</button>${parts.map((part,i)=>`<span>/</span><button data-directory="${esc(parts.slice(0,i+1).join('/'))}">${esc(part)}</button>`).join('')}<button id="refresh-workspace-files" class="icon-button" aria-label="${uiText('刷新文件')}">${icon('refresh')}</button></nav><div class="workspace-file-list">${value.status==='list_error' ? `<p class="file-empty" role="alert">${uiText('无法读取这个目录。')}</p>` : data.entries.length ? data.entries.map((file,i)=>`<div class="workspace-file-row"><button class="workspace-file-main" data-file-index="${i}"><span class="file-kind">${icon(file.directory?'folder':'file')}</span><span><strong>${esc(file.name)}</strong><small>${file.directory ? uiText('文件夹') : fileSize(file.size)}</small></span>${file.directory?icon('right'):''}</button>${file.directory ? '' : `<button class="icon-button" data-save-file="${i}" aria-label="${uiText('保存到 Downloads')}" title="${uiText('保存到 Downloads')}">${icon('download')}</button><button class="icon-button" data-share-file="${i}" aria-label="${uiText('分享文件')}" title="${uiText('分享文件')}">${icon('share')}</button>`}</div>`).join('') : `<div class="file-empty">${icon('folder')}<p>${uiText('这里还没有文件')}</p><small>${uiText('让 kaipi 创建的文件，会出现在这里。')}</small></div>`}</div><p class="file-status" id="workspace-file-status" role="status">${uiText('文件保留在本机，保存与分享会创建副本。')}</p>`);
+    $('dialog').classList.add('workspace-files-dialog');
+    $('workspace-file-status').insertAdjacentHTML('beforebegin', `<div class="dialog-footer"><button id="save-workspace-directory" class="button">${icon('download')}${uiText('保存文件夹为 ZIP')}</button></div>`);
+    $('save-workspace-directory').onclick = () => Native.saveWorkspaceFile(data.path);
+    $('refresh-workspace-files').onclick = () => browseWorkspace(data.path);
+    $('dialog').querySelectorAll('[data-directory]').forEach(button=>button.onclick=()=>browseWorkspace(button.dataset.directory));
+    $('dialog').querySelectorAll('[data-file-index]').forEach(button=>button.onclick=()=>{
+      const file=data.entries[Number(button.dataset.fileIndex)];
+      if(file.directory) browseWorkspace(file.path); else openWorkspaceFile(file.path);
+    });
+    $('dialog').querySelectorAll('[data-save-file]').forEach(button=>button.onclick=()=>Native.saveWorkspaceFile(data.entries[Number(button.dataset.saveFile)].path));
+    $('dialog').querySelectorAll('[data-share-file]').forEach(button=>button.onclick=()=>Native.shareWorkspaceFile(data.entries[Number(button.dataset.shareFile)].path));
+    return;
+  }
+  const status = $('workspace-file-status');
+  if (status && !$('overlay').hidden) status.textContent = uiText(value.data);
+  else toast(value.data);
+}
+function fileSize(size) {
+  if (size < 1024) return `${size} B`;
+  return size < 1048576 ? `${(size/1024).toFixed(1)} KB` : `${(size/1048576).toFixed(1)} MB`;
 }
 async function addAttachments(files) {
   const targetSession = state?.session;
@@ -826,6 +879,7 @@ $('new-chat').onclick = async () => { try { saveDraft(); await mutate('new'); ra
 $('update-settings').onclick = openUpdates; $('settings').onclick = openSettings; $('language-settings').onclick = openLanguageSettings; $('provider-reminder').onclick = openSettings; $('appearance-button').onclick = openAppearance; $('model-picker').onclick = openModelPicker; $('rename').onclick = renameDialog;
 $('session-search').oninput = renderSessions;
 $('workspace').onclick = () => { if (window.Native?.workspaces) Native.workspaces(); else toast(uiText('本地工作区')); };
+$('workspace-files').onclick = () => { rail(false); browseWorkspace(''); };
 $('sessions').onclick = async event => { const button = event.target.closest('[data-session]'); if (!button) return; try { saveDraft(); await mutate('resume', {id:button.dataset.session}); rail(false); } catch (error) { fail(error); } };
 $('messages').onclick = async event => {
   const retry = event.target.closest('[data-retry-turn]');
@@ -870,7 +924,7 @@ document.addEventListener('keydown', event => {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
 });
-document.addEventListener('click', event => { const anchor = event.target.closest('.markdown a'); if (anchor) { event.preventDefault(); copy(anchor.getAttribute('href')); } });
+document.addEventListener('click', event => { const anchor = event.target.closest('.markdown a'); if (anchor) { event.preventDefault(); if (anchor.hasAttribute('data-workspace-file')) openWorkspaceFile(anchor.dataset.workspaceFile, true); else copy(anchor.getAttribute('href')); } });
 document.addEventListener('paste', event => { if (event.clipboardData?.files.length && $('overlay').hidden) { event.preventDefault(); readFiles([...event.clipboardData.files]); } });
 document.addEventListener('dragover', event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); document.body.classList.add('dragging'); } });
 document.addEventListener('dragleave', event => { if (!event.relatedTarget) document.body.classList.remove('dragging'); });

@@ -21,12 +21,14 @@ public final class MainActivity extends Activity {
     private String workspace;
     private SharedPreferences prefs;
     private AppUpdates updates;
+    private WorkspaceFiles workspaceFiles;
     private final ExecutorService files = Executors.newSingleThreadExecutor();
     private final Map<String, LocalCore> engines = new HashMap<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         updates = new AppUpdates(this, stateValue -> platformEvent("update", stateValue));
+        workspaceFiles = new WorkspaceFiles(this, value -> platformEvent("workspaceFiles", value));
         prefs = getSharedPreferences("tabs", MODE_PRIVATE);
         workspace = prefs.getString("active", "");
         try { UUID.fromString(workspace); } catch (IllegalArgumentException error) { workspace = UUID.randomUUID().toString(); }
@@ -106,6 +108,10 @@ public final class MainActivity extends Activity {
         engine.start(getApplicationContext(), new File(getFilesDir(), "workspaces/" + id));
     }
     public final class Bridge {
+        @JavascriptInterface public void listWorkspaceFiles(String request, String path) { runOnUiThread(() -> workspaceFiles.list(workspace, request, path)); }
+        @JavascriptInterface public void openWorkspaceFile(String path, String appearance) { runOnUiThread(() -> workspaceFiles.open(workspace, path, appearance)); }
+        @JavascriptInterface public void saveWorkspaceFile(String path) { runOnUiThread(() -> workspaceFiles.save(workspace, path)); }
+        @JavascriptInterface public void shareWorkspaceFile(String path) { runOnUiThread(() -> workspaceFiles.share(workspace, path)); }
         @JavascriptInterface public void menuGesture(boolean enabled) { runOnUiThread(() -> {
             if (destroyed) return;
             menuGesture = enabled; updateMenuGestureExclusion(web, menuGesture);
@@ -167,6 +173,7 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == AppUpdates.STORAGE_PERMISSION) updates.storageResult(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+        if (request == WorkspaceFiles.STORAGE_PERMISSION) workspaceFiles.permissionResult(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
     }
     @Override protected void onActivityResult(int request, int result, Intent intent) {
         super.onActivityResult(request, result, intent);
@@ -207,7 +214,7 @@ public final class MainActivity extends Activity {
         web.evaluateJavascript("window.kaipi.back()", result -> { if ("false".equals(result)) finish(); });
     }
     @Override protected void onDestroy() {
-        destroyed = true; updateScreenAwake(); updates.close(); files.shutdownNow();
+        destroyed = true; updateScreenAwake(); updates.close(); workspaceFiles.close(); files.shutdownNow();
         for (LocalCore engine : engines.values()) engine.close();
         web.removeJavascriptInterface("Native"); web.destroy();
         super.onDestroy();

@@ -79,6 +79,8 @@ class BridgeTests(unittest.TestCase):
             self.assertIn('kaipi for Android', prompt)
             self.assertIn('API 34', prompt)
             self.assertIn('/system/bin/sh', prompt)
+            self.assertIn('[Open page](./index.html)', prompt)
+            self.assertIn('HTML previews are offline', prompt)
             self.assertIn(str(self.cwd.resolve()), prompt)
             self.assertIn(str(Path.home()), prompt)
             self.assertIn(self.app.app_instructions, prompt)

@@ -78,6 +78,7 @@ jobs:
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
           KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
+          KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 
       - name: Build Android runtime
         run: python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"

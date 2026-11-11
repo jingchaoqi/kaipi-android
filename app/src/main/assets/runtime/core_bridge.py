@@ -36,7 +36,12 @@ def android_instructions(cwd: Path) -> str:
         f'Workspace: {json.dumps(str(cwd.resolve()), ensure_ascii=False)}. '
         f'App HOME: {json.dumps(str(Path.home()), ensure_ascii=False)}.\n'
         'Filesystem access follows Android app permissions; network access depends on device '
-        'connectivity. Determine command, file and network availability from actual tool results.'
+        'connectivity. Determine command, file and network availability from actual tool results.\n'
+        'For file deliverables, create the real files in the workspace and link to them in your reply '
+        'using relative Markdown links, for example [Open page](./index.html). The Android app can '
+        'preview workspace files and let the user share them or save copies to Downloads. '
+        'HTML previews are offline: keep pages self-contained or use relative workspace resources, not external CDNs. '
+        'Do not claim a file was saved to public Downloads unless a tool result confirms it.'
     )
 
 

@@ -54,6 +54,16 @@ core 负责恢复原输入、附件及嫁接快照、保留主干或探索身份
 重试使用当前模型，保留新草稿；可能执行过工具时先用应用内确认界面提示已有改动会保留。
 请求确认超时只同步执行状态，不自动重新发送；界面重连后依据 core 状态恢复。
 
+## 文件交付
+
+工作区仍位于应用私有的 `files/workspaces/<UUID>/`，不迁移旧数据。菜单「工作区文件」独立于 core 进程浏览目录；Markdown 相对文件链接及工作区内的 `file:` 链接由 Android 接管。新会话的应用层说明约定交付真实文件与相对 Markdown 链接，并说明 HTML 预览离线运行。
+
+`WorkspaceStorage` 限制路径和符号链接目标必须留在当前工作区，隐藏并拒绝 `.git`、`.kaipi` 内部数据。HTML、图片与文本使用独立的 `FilePreviewActivity`，其 WebView 无任何 JavascriptInterface，禁用 file/content 访问，只提供工作区资源；HTML 允许本地脚本，CSP 阻止网络资源、联网请求、嵌套页面和 Worker。外链须用户点击后交给系统浏览器。文本按内容转义展示，最大预览 2 MiB，大文件仍可保存、分享。
+
+PDF、Office、音视频等交给系统支持的应用打开。打开与分享先建立只读缓存快照，通过独立的 FileProvider 临时授予单个 URI 的读取权限，不公开工作区目录或 HOME。找不到支持的应用时给出保存提示。
+
+保存操作在 Android 10+ 使用 MediaStore Downloads，写入 `Downloads/kaipi`，完成后才公开条目，失败时删除未完成条目；Android 8/9 请求系统写入授权，显式创建新文件，重名自动编号。目录保存为 ZIP，保留相对路径，跳过符号链接与 core 内部目录。保存和分享均创建副本，不改动源文件或会话。
+
 ## 构建
 
 需要 Linux、Python 3.11+、uv、Node.js、JDK 17+、Rust 1.90、Android SDK 35 / Build Tools 35.0.0、NDK 27.0.12077973。构建目标 Android 8.0+，包含 arm64-v8a / x86_64。建议使用最新 Android System WebView。
@@ -118,6 +128,7 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 ```
 
 可用 `CHROMIUM_BIN` 指定已有 Chromium。测试覆盖真实 adapter/core 调用、手机布局、树操作、停止、草稿、模型界面、主题持久化、系统主题跟随和减少动态效果。
