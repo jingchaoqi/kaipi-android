@@ -114,6 +114,11 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void openWorkspaceFile(String path, String appearance) { runOnUiThread(() -> workspaceFiles.open(workspace, path, appearance)); }
         @JavascriptInterface public void saveWorkspaceFile(String path) { runOnUiThread(() -> workspaceFiles.save(workspace, path)); }
         @JavascriptInterface public void shareWorkspaceFile(String path) { runOnUiThread(() -> workspaceFiles.share(workspace, path)); }
+        @JavascriptInterface public void deleteWorkspaceFile(String expectedWorkspace, String request, String path, String revision) { runOnUiThread(() -> {
+            if (destroyed) return;
+            if (!workspace.equals(expectedWorkspace)) workspaceFiles.rejectDelete(request, "工作区已切换，请重新选择文件。");
+            else workspaceFiles.delete(workspace, request, path, revision);
+        }); }
         @JavascriptInterface public void menuGesture(boolean enabled) { runOnUiThread(() -> {
             if (destroyed) return;
             menuGesture = enabled; updateMenuGestureExclusion(web, menuGesture);

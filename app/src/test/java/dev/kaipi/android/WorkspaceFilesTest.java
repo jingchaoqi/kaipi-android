@@ -78,6 +78,69 @@ public class WorkspaceFilesTest {
         assertEquals(1, WorkspaceStorage.list(root, "").getJSONArray("entries").length());
         assertEquals(new File(root,"safe.txt"), WorkspaceStorage.resolve(root, Uri.fromFile(new File(root,"safe.txt")).toString()));
     }
+    @Test public void confirmedDeletionRemovesOnlyTheSelectedFileAndReportsItsRequest() throws Exception {
+        File selected=file("设计稿 100% #1.html","deliverable"),keep=file("keep.txt","keep");
+        File log=file(".kaipi/sessions/log.jsonl","history");
+        delivery.list(workspace,"list","");idle();
+        JSONObject listed=events.get(0).getJSONObject("data");assertEquals(workspace,listed.getString("workspace"));
+        String revision=WorkspaceStorage.deletionRevision(root,selected.getName());assertTrue(revision.matches("[0-9a-f]{64}"));
+        assertTrue(listed.getJSONArray("entries").toString().contains(revision));
+        delivery.delete(workspace,"confirm-1",selected.getName(),revision);idle();
+        JSONObject result=events.get(events.size()-1);assertEquals("deleted",result.getString("status"));assertEquals("confirm-1",result.getString("request"));
+        assertFalse(selected.exists());assertEquals("keep",read(keep));assertEquals("history",read(log));
+    }
+    @Test public void changedFilesAndRevisionsFromAnotherWorkspaceAreNotDeleted() throws Exception {
+        File selected=file("notes.txt","original");String revision=WorkspaceStorage.deletionRevision(root,"notes.txt");
+        Files.write(selected.toPath(),"changed contents".getBytes(StandardCharsets.UTF_8));
+        delivery.delete(workspace,"stale","notes.txt",revision);idle();
+        assertEquals("delete_error",events.get(events.size()-1).optString("status"));assertEquals("changed contents",read(selected));
+        File other=WorkspaceStorage.root(host,UUID.randomUUID().toString());assertTrue(other.mkdirs());
+        File sameName=new File(other,"notes.txt");Files.write(sameName.toPath(),"original".getBytes(StandardCharsets.UTF_8));
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(other,"notes.txt",revision));assertTrue(sameName.exists());
+    }
+    @Test public void deletionRejectsDirectoriesInternalPathsAndReplacedSymlinks() throws Exception {
+        File selected=file("selected.txt","original");String revision=WorkspaceStorage.deletionRevision(root,"selected.txt");
+        Files.move(selected.toPath(),new File(root,"moved.txt").toPath());
+        Files.createSymbolicLink(selected.toPath(),new File(root,"moved.txt").toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(root,"selected.txt",revision));assertTrue(new File(root,"moved.txt").exists());
+        file("folder/keep.txt","keep");file(".git/config","git");file(".kaipi/log.jsonl","history");
+        for(String path:new String[]{"","folder",".git/config",".kaipi/log.jsonl","../home/key.json",new File(root,"moved.txt").getPath()})
+            assertThrows(path,IOException.class,()->WorkspaceStorage.deleteFile(root,path,revision));
+        String nested=WorkspaceStorage.deletionRevision(root,"folder/keep.txt");
+        Files.move(new File(root,"folder").toPath(),new File(root,"renamed-folder").toPath());
+        Files.createSymbolicLink(new File(root,"folder").toPath(),new File(root,"renamed-folder").toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(root,"folder/keep.txt",nested));assertTrue(new File(root,"renamed-folder/keep.txt").exists());
+    }
+    @Test public void workspaceRootCannotBeReplacedWithALinkToPrivateHome() throws Exception {
+        File home=new File(host.getFilesDir(),"home");home.mkdirs();String id=UUID.randomUUID().toString();
+        Files.createSymbolicLink(new File(root.getParentFile(),id).toPath(),home.toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.root(host,id));
+    }
+    @Test public void bridgeRejectsDeletionAfterTheWorkspaceChanges() throws Exception {
+        ActivityController<MainActivity> app=Robolectric.buildActivity(MainActivity.class).setup();
+        try {
+            MainActivity main=app.get();Field active=MainActivity.class.getDeclaredField("workspace");active.setAccessible(true);
+            File current=WorkspaceStorage.root(main,(String)active.get(main));current.mkdirs();
+            File selected=new File(current,"keep.txt");Files.write(selected.toPath(),"keep".getBytes(StandardCharsets.UTF_8));
+            main.new Bridge().deleteWorkspaceFile(UUID.randomUUID().toString(),"old-workspace","keep.txt",WorkspaceStorage.deletionRevision(current,"keep.txt"));
+            Shadows.shadowOf(Looper.getMainLooper()).idle();assertEquals("keep",read(selected));
+            Field field=MainActivity.class.getDeclaredField("web");field.setAccessible(true);
+            assertTrue(Shadows.shadowOf((android.webkit.WebView)field.get(main)).getLastEvaluatedJavascript().contains("delete_error"));
+        } finally {app.pause().stop().destroy();}
+    }
+    @Test public void anExpiredQueuedDeleteNeverRemovesTheFileLater() throws Exception {
+        File selected=file("queued.txt","keep");String revision=WorkspaceStorage.deletionRevision(root,"queued.txt");
+        Field field=WorkspaceFiles.class.getDeclaredField("worker");field.setAccessible(true);
+        ExecutorService worker=(ExecutorService)field.get(delivery);
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        worker.submit(()->{entered.countDown();try{release.await(10,TimeUnit.SECONDS);}catch(InterruptedException error){Thread.currentThread().interrupt();}});
+        assertTrue(entered.await(5,TimeUnit.SECONDS));
+        try {
+            delivery.delete(workspace,"expired","queued.txt",revision);
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(16));
+        } finally {release.countDown();}
+        idle();assertEquals("keep",read(selected));assertEquals("delete_error",events.get(events.size()-1).optString("status"));
+    }
     @Test public void folderArchivePreservesResourcesAndOmitsInternalDataAndLinks() throws Exception {
         file("index.html", "<link href='./assets/style.css'>"); file("assets/style.css", "body{color:red}");
         file("assets/中文.txt", "你好"); file(".kaipi/sessions/log", "INTERNAL"); file(".git/config", "INTERNAL");

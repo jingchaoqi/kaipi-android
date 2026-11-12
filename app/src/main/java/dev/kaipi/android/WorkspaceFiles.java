@@ -33,8 +33,24 @@ final class WorkspaceFiles implements AutoCloseable {
     }
     void list(String workspace, String request, String path) {
         worker.execute(() -> {
-            try { event("listed", request, WorkspaceStorage.list(WorkspaceStorage.root(activity, workspace), path)); }
+            try { event("listed", request, WorkspaceStorage.list(WorkspaceStorage.root(activity, workspace), path).put("workspace", workspace)); }
             catch (Exception error) { event("list_error", request, "无法读取这个目录。"); }
+        });
+    }
+    void rejectDelete(String request, String reason) { event("delete_error", request, reason); }
+    void delete(String workspace, String request, String path, String revision) {
+        if (closed) return;
+        long expires = SystemClock.elapsedRealtime() + 15000;
+        worker.execute(() -> {
+            if (closed) return;
+            try {
+                if (SystemClock.elapsedRealtime() >= expires) throw new IOException("expired");
+                WorkspaceStorage.deleteFile(WorkspaceStorage.root(activity, workspace), path, revision);
+                event("deleted", request, path);
+            } catch (Exception error) {
+                rejectDelete(request, "changed_file".equals(error.getMessage())
+                    ? "文件已变化，请刷新列表后重新确认。" : "无法删除文件，请刷新列表后重试。");
+            }
         });
     }
     void open(String workspace, String path, String appearance) {

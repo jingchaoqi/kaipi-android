@@ -1,6 +1,13 @@
 /* Translate UI literals only. Template substitutions (messages, code and names) stay intact. */
 (() => {
   const messages = {
+    '删除文件':'Delete file', '删除这个文件？':'Delete this file?', '删除后无法恢复。':'Deletion cannot be undone.',
+    '文件将从当前工作区中永久删除。':'The file will be permanently removed from this workspace.',
+    '永久删除':'Delete permanently', '正在删除…':'Deleting…', '已删除。':'Deleted.', '返回列表':'Back to files',
+    '文件已变化，请刷新列表后重新确认。':'The file has changed. Refresh the list and confirm again.',
+    '无法删除文件，请刷新列表后重试。':'The file could not be deleted. Refresh the list and try again.',
+    '工作区已切换，请重新选择文件。':'The workspace changed. Select the file again.',
+    '删除结果尚未确认，请返回列表检查。':'The deletion result is not confirmed. Return to the list to check.',
     '工作区文件':'Workspace files', '工作区':'Workspace', '文件路径':'File path', '刷新文件':'Refresh files',
     '文件夹':'Folder', '分享文件':'Share file', '保存到 Downloads':'Save to Downloads',
     '保存文件夹为 ZIP':'Save folder as ZIP', '正在读取文件…':'Reading files…',
