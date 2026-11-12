@@ -4,10 +4,13 @@ import android.app.Activity;
 import android.content.*;
 import android.content.pm.ProviderInfo;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
 import android.webkit.WebResourceResponse;
+import android.view.View;
+import android.widget.TextView;
 import org.json.*;
 import org.junit.*;
 import org.junit.runner.RunWith;
@@ -55,8 +58,11 @@ public class WorkspaceFilesTest {
     }
     private String read(File file) throws IOException { return new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8); }
     private void idle() throws Exception {
+        idle(delivery);
+    }
+    private void idle(WorkspaceFiles files) throws Exception {
         Field worker = WorkspaceFiles.class.getDeclaredField("worker"); worker.setAccessible(true);
-        ((ExecutorService)worker.get(delivery)).submit(() -> {}).get(10, TimeUnit.SECONDS);
+        ((ExecutorService)worker.get(files)).submit(() -> {}).get(10, TimeUnit.SECONDS);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
     }
     @Test public void existingFilesAreBrowsableWithoutStartingOrChangingCore() throws Exception {
@@ -77,6 +83,69 @@ public class WorkspaceFilesTest {
             assertThrows(path, IOException.class, () -> WorkspaceStorage.resolve(root, path));
         assertEquals(1, WorkspaceStorage.list(root, "").getJSONArray("entries").length());
         assertEquals(new File(root,"safe.txt"), WorkspaceStorage.resolve(root, Uri.fromFile(new File(root,"safe.txt")).toString()));
+    }
+    @Test public void confirmedDeletionRemovesOnlyTheSelectedFileAndReportsItsRequest() throws Exception {
+        File selected=file("设计稿 100% #1.html","deliverable"),keep=file("keep.txt","keep");
+        File log=file(".kaipi/sessions/log.jsonl","history");
+        delivery.list(workspace,"list","");idle();
+        JSONObject listed=events.get(0).getJSONObject("data");assertEquals(workspace,listed.getString("workspace"));
+        String revision=WorkspaceStorage.deletionRevision(root,selected.getName());assertTrue(revision.matches("[0-9a-f]{64}"));
+        assertTrue(listed.getJSONArray("entries").toString().contains(revision));
+        delivery.delete(workspace,"confirm-1",selected.getName(),revision);idle();
+        JSONObject result=events.get(events.size()-1);assertEquals("deleted",result.getString("status"));assertEquals("confirm-1",result.getString("request"));
+        assertFalse(selected.exists());assertEquals("keep",read(keep));assertEquals("history",read(log));
+    }
+    @Test public void changedFilesAndRevisionsFromAnotherWorkspaceAreNotDeleted() throws Exception {
+        File selected=file("notes.txt","original");String revision=WorkspaceStorage.deletionRevision(root,"notes.txt");
+        Files.write(selected.toPath(),"changed contents".getBytes(StandardCharsets.UTF_8));
+        delivery.delete(workspace,"stale","notes.txt",revision);idle();
+        assertEquals("delete_error",events.get(events.size()-1).optString("status"));assertEquals("changed contents",read(selected));
+        File other=WorkspaceStorage.root(host,UUID.randomUUID().toString());assertTrue(other.mkdirs());
+        File sameName=new File(other,"notes.txt");Files.write(sameName.toPath(),"original".getBytes(StandardCharsets.UTF_8));
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(other,"notes.txt",revision));assertTrue(sameName.exists());
+    }
+    @Test public void deletionRejectsDirectoriesInternalPathsAndReplacedSymlinks() throws Exception {
+        File selected=file("selected.txt","original");String revision=WorkspaceStorage.deletionRevision(root,"selected.txt");
+        Files.move(selected.toPath(),new File(root,"moved.txt").toPath());
+        Files.createSymbolicLink(selected.toPath(),new File(root,"moved.txt").toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(root,"selected.txt",revision));assertTrue(new File(root,"moved.txt").exists());
+        file("folder/keep.txt","keep");file(".git/config","git");file(".kaipi/log.jsonl","history");
+        for(String path:new String[]{"","folder",".git/config",".kaipi/log.jsonl","../home/key.json",new File(root,"moved.txt").getPath()})
+            assertThrows(path,IOException.class,()->WorkspaceStorage.deleteFile(root,path,revision));
+        String nested=WorkspaceStorage.deletionRevision(root,"folder/keep.txt");
+        Files.move(new File(root,"folder").toPath(),new File(root,"renamed-folder").toPath());
+        Files.createSymbolicLink(new File(root,"folder").toPath(),new File(root,"renamed-folder").toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.deleteFile(root,"folder/keep.txt",nested));assertTrue(new File(root,"renamed-folder/keep.txt").exists());
+    }
+    @Test public void workspaceRootCannotBeReplacedWithALinkToPrivateHome() throws Exception {
+        File home=new File(host.getFilesDir(),"home");home.mkdirs();String id=UUID.randomUUID().toString();
+        Files.createSymbolicLink(new File(root.getParentFile(),id).toPath(),home.toPath());
+        assertThrows(IOException.class,()->WorkspaceStorage.root(host,id));
+    }
+    @Test public void bridgeRejectsDeletionAfterTheWorkspaceChanges() throws Exception {
+        ActivityController<MainActivity> app=Robolectric.buildActivity(MainActivity.class).setup();
+        try {
+            MainActivity main=app.get();Field active=MainActivity.class.getDeclaredField("workspace");active.setAccessible(true);
+            File current=WorkspaceStorage.root(main,(String)active.get(main));current.mkdirs();
+            File selected=new File(current,"keep.txt");Files.write(selected.toPath(),"keep".getBytes(StandardCharsets.UTF_8));
+            main.new Bridge().deleteWorkspaceFile(UUID.randomUUID().toString(),"old-workspace","keep.txt",WorkspaceStorage.deletionRevision(current,"keep.txt"));
+            Shadows.shadowOf(Looper.getMainLooper()).idle();assertEquals("keep",read(selected));
+            Field field=MainActivity.class.getDeclaredField("web");field.setAccessible(true);
+            assertTrue(Shadows.shadowOf((android.webkit.WebView)field.get(main)).getLastEvaluatedJavascript().contains("delete_error"));
+        } finally {app.pause().stop().destroy();}
+    }
+    @Test public void anExpiredQueuedDeleteNeverRemovesTheFileLater() throws Exception {
+        File selected=file("queued.txt","keep");String revision=WorkspaceStorage.deletionRevision(root,"queued.txt");
+        Field field=WorkspaceFiles.class.getDeclaredField("worker");field.setAccessible(true);
+        ExecutorService worker=(ExecutorService)field.get(delivery);
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        worker.submit(()->{entered.countDown();try{release.await(10,TimeUnit.SECONDS);}catch(InterruptedException error){Thread.currentThread().interrupt();}});
+        assertTrue(entered.await(5,TimeUnit.SECONDS));
+        try {
+            delivery.delete(workspace,"expired","queued.txt",revision);
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(16));
+        } finally {release.countDown();}
+        idle();assertEquals("keep",read(selected));assertEquals("delete_error",events.get(events.size()-1).optString("status"));
     }
     @Test public void folderArchivePreservesResourcesAndOmitsInternalDataAndLinks() throws Exception {
         file("index.html", "<link href='./assets/style.css'>"); file("assets/style.css", "body{color:red}");
@@ -111,6 +180,50 @@ public class WorkspaceFilesTest {
             assertTrue(web.getSettings().getJavaScriptEnabled());assertFalse(web.getSettings().getAllowFileAccess());assertFalse(web.getSettings().getAllowContentAccess());
             assertNull(Shadows.shadowOf(web).getJavascriptInterface("Native"));
             assertEquals(FilePreviewActivity.url("index.html"),Shadows.shadowOf(web).getLastLoadedUrl());
+        } finally {preview.pause().stop().destroy();}
+    }
+    private TextView previewButton(Activity preview, String description) {
+        ArrayList<View> matches = new ArrayList<>();
+        preview.getWindow().getDecorView().findViewsWithText(matches, description, View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+        assertEquals(description, 1, matches.size()); return (TextView)matches.get(0);
+    }
+    @Test public void previewActionsGiveHapticFeedbackAndToastTheActualSavedLocation() throws Exception {
+        for (String language : new String[]{"zh", "en"}) {
+            String name="预览-"+UUID.randomUUID()+".html";file(name,"<h1>Preview</h1>");
+            Intent intent=new Intent(host,FilePreviewActivity.class).putExtra("workspace",workspace).putExtra("path",name).putExtra("appearance","{\"language\":\""+language+"\"}");
+            ActivityController<FilePreviewActivity> preview=Robolectric.buildActivity(FilePreviewActivity.class,intent).setup();
+            try {
+                Field field=FilePreviewActivity.class.getDeclaredField("delivery");field.setAccessible(true);
+                WorkspaceFiles files=(WorkspaceFiles)field.get(preview.get());boolean en=language.equals("en");
+                TextView save=previewButton(preview.get(),en?"Save to Downloads":"保存到 Downloads");
+                assertTrue(save.getBackground() instanceof android.graphics.drawable.RippleDrawable);
+                org.robolectric.shadows.ShadowToast.reset();save.performClick();
+                assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,Shadows.shadowOf(save).lastHapticFeedbackPerformed());
+                assertFalse(save.isEnabled());assertNull(org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+                idle(files);assertTrue(save.isEnabled());
+                assertEquals((en?"Saved to ":"已保存到 ")+Environment.DIRECTORY_DOWNLOADS+"/kaipi/"+name,org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+                save.performClick();idle(files);
+                assertEquals((en?"Saved to ":"已保存到 ")+Environment.DIRECTORY_DOWNLOADS+"/kaipi/"+name.replace(".html"," (1).html"),org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+                TextView share=previewButton(preview.get(),en?"Share file":"分享文件");share.performClick();idle(files);
+                assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,Shadows.shadowOf(share).lastHapticFeedbackPerformed());
+                assertEquals(Intent.ACTION_CHOOSER,Shadows.shadowOf(preview.get()).getNextStartedActivity().getAction());
+                if(downloads!=null){
+                    downloads.metadataUnavailable=true;save.performClick();idle(files);
+                    assertEquals((en?"Saved to ":"已保存到 ")+Environment.DIRECTORY_DOWNLOADS+"/kaipi",org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+                    downloads.metadataUnavailable=false;
+                }
+            } finally {preview.pause().stop().destroy();}
+        }
+    }
+    @Test public void previewSaveFailureShowsAnErrorInsteadOfASuccessToast() throws Exception {
+        File source=file("missing.html","<h1>Preview</h1>");
+        Intent intent=new Intent(host,FilePreviewActivity.class).putExtra("workspace",workspace).putExtra("path","missing.html").putExtra("appearance","{}");
+        ActivityController<FilePreviewActivity> preview=Robolectric.buildActivity(FilePreviewActivity.class,intent).setup();
+        try {
+            assertTrue(source.delete());org.robolectric.shadows.ShadowToast.reset();
+            TextView save=previewButton(preview.get(),"保存到 Downloads");save.performClick();
+            Field field=FilePreviewActivity.class.getDeclaredField("delivery");field.setAccessible(true);idle((WorkspaceFiles)field.get(preview.get()));
+            assertTrue(save.isEnabled());assertEquals("保存失败，请检查可用空间和文件是否存在。",org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         } finally {preview.pause().stop().destroy();}
     }
     @Test public void previewKeepsTheScreenAwakeOnlyForAnActiveForegroundConversation() throws Exception {
@@ -153,6 +266,8 @@ public class WorkspaceFilesTest {
         delivery.save(workspace,name); idle(); delivery.save(workspace,name); idle();
         assertEquals("delivered",read(original));
         assertEquals(2,events.stream().filter(e->e.optString("status").equals("saved")).count());
+        List<String> locations=new ArrayList<>();for(JSONObject event:events)if(event.optString("status").equals("saved"))locations.add(event.getString("location"));
+        assertEquals(Arrays.asList(Environment.DIRECTORY_DOWNLOADS+"/kaipi/"+name,Environment.DIRECTORY_DOWNLOADS+"/kaipi/"+name.replace(".txt"," (1).txt")),locations);
         if(downloads!=null) {
             assertEquals(2,downloads.records.size());
             for(Record record:downloads.records.values()) {
@@ -190,10 +305,16 @@ public class WorkspaceFilesTest {
         Record(ContentValues values,File file) {this.values=new ContentValues(values);this.file=file;}
     }
     public static class Downloads extends ContentProvider {
-        final Map<Uri,Record> records=new LinkedHashMap<>(); int counter; boolean fail;
+        final Map<Uri,Record> records=new LinkedHashMap<>(); int counter; boolean fail,metadataUnavailable;
         @Override public boolean onCreate(){return true;}
         @Override public Uri insert(Uri uri,ContentValues values){
             Uri item=Uri.withAppendedPath(uri,String.valueOf(++counter)); Record record=new Record(values,new File(getContext().getCacheDir(),"download-"+counter));records.put(item,record);
+            String requested=values.getAsString(MediaStore.Downloads.DISPLAY_NAME),name=requested;
+            for(int i=1;;i++){
+                String candidate=name;boolean duplicate=records.entrySet().stream().anyMatch(entry->!entry.getKey().equals(item)&&candidate.equals(entry.getValue().values.getAsString(MediaStore.Downloads.DISPLAY_NAME)));
+                if(!duplicate)break;int dot=requested.lastIndexOf('.');name=(dot>0?requested.substring(0,dot):requested)+" ("+i+")"+(dot>0?requested.substring(dot):"");
+            }
+            record.values.put(MediaStore.Downloads.DISPLAY_NAME,name);
             Shadows.shadowOf(getContext().getContentResolver()).registerOutputStreamSupplier(item,()->{
                 if(fail) return new OutputStream(){@Override public void write(int value)throws IOException{throw new IOException("full disk");}};
                 try{return new FileOutputStream(record.file);}catch(IOException error){throw new UncheckedIOException(error);}
@@ -207,6 +328,10 @@ public class WorkspaceFilesTest {
         @Override public int update(Uri uri,ContentValues values,String selection,String[] args){records.get(uri).values.putAll(values);return 1;}
         @Override public int delete(Uri uri,String selection,String[] args){Record record=records.remove(uri);if(record!=null)record.file.delete();return 1;}
         @Override public String getType(Uri uri){return "application/octet-stream";}
-        @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String order){return null;}
+        @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String order){
+            if(metadataUnavailable)throw new IllegalStateException("metadata unavailable");
+            MatrixCursor cursor=new MatrixCursor(projection);Object[] row=new Object[projection.length];
+            for(int i=0;i<projection.length;i++)row[i]=records.get(uri).values.get(projection[i]);cursor.addRow(row);return cursor;
+        }
     }
 }

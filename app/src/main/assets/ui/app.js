@@ -17,6 +17,7 @@ let providerSelection = null, providerDrafts = new Map(), providerEpoch = 0;
 let activeSubmission = null;
 let updateState = null;
 let workspaceBrowser = {request:0, path:''};
+let fileDelete = null, fileDeleteRequest = 0;
 let menuDrag = null, menuDragFrame = 0, menuExclusion = null;
 const mobileMenu = matchMedia('(max-width:800px)');
 
@@ -459,7 +460,7 @@ function showDialog(title, html, wide = false) {
   $('dialog').innerHTML = uiHtml`<div class="dialog-header"><h2 id="dialog-title">${esc(title)}</h2><button id="dialog-close" class="icon-button" aria-label="关闭对话框">${icon('close')}</button></div>${html}`;
   $('dialog-close').onclick = closeDialog;
   $('app').inert = true;
-  requestAnimationFrame(() => { const target = $('dialog').querySelector('input:not([type=radio]),textarea') || $('dialog'); target.focus({preventScroll:true}); });
+  requestAnimationFrame(() => { if (fileDelete) return; const target = $('dialog').querySelector('input:not([type=radio]),textarea') || $('dialog'); target.focus({preventScroll:true}); });
 }
 function updateReceived(next) {
   updateState = next;
@@ -502,7 +503,7 @@ function renderUpdate() {
   if (oldFocus && $(oldFocus) && !$(oldFocus).disabled) $(oldFocus).focus({preventScroll:true});
 }
 function lastDialogFocus() { if ($('overlay').hidden) dialogFocus = document.activeElement; }
-function closeDialog() { if (onboardingStep) return; $('overlay').classList.remove('onboarding-overlay'); $('overlay').hidden = true; $('app').inert = false; if (dialogFocus?.isConnected) dialogFocus.focus({preventScroll:true}); }
+function closeDialog() { if (onboardingStep) return; if (fileDelete) { closeFileDelete(); return; } $('overlay').classList.remove('onboarding-overlay'); $('overlay').hidden = true; $('app').inert = false; if (dialogFocus?.isConnected) dialogFocus.focus({preventScroll:true}); }
 function confirmDialog(title, description, label, action, danger = false) {
   showDialog(title, uiHtml`<p class="dialog-description">${esc(description)}</p><div id="dialog-error" class="error-message" role="alert"></div><div class="dialog-footer"><button id="cancel" class="button">取消</button><button id="confirm" class="button ${danger ? 'danger' : 'primary'}">${esc(label)}</button></div>`);
   $('cancel').onclick = closeDialog;
@@ -786,21 +787,29 @@ function openWorkspaceFile(path, link = false) {
     Native.openWorkspaceFile(value, previewAppearance());
   } catch { toast(uiText('无法识别这个文件路径。')); }
 }
-function browseWorkspace(path = '') {
+function browseWorkspace(path = '', scroll = 0) {
   if (!window.Native?.listWorkspaceFiles) return toast(uiText('请在 Android 应用中打开工作区文件。'));
-  workspaceBrowser = {request:workspaceBrowser.request+1, path};
-  showDialog(uiText('工作区文件'), `<div class="workspace-file-loading" role="status"><span class="engine-sprout" aria-hidden="true"><i></i><i></i><i></i></span>${uiText('正在读取文件…')}</div>`);
-  $('dialog').classList.add('workspace-files-dialog');
+  const refreshing = !$('overlay').hidden && $('dialog').classList.contains('workspace-files-dialog') && $('workspace-file-status') && path === workspaceBrowser.path;
+  workspaceBrowser = {request:workspaceBrowser.request+1, path, scroll};
+  if (refreshing) {
+    $('dialog').querySelectorAll('.workspace-file-list button, #refresh-workspace-files').forEach(button=>button.disabled=true);
+    $('workspace-file-status').textContent = uiText('正在读取文件…');
+  } else {
+    showDialog(uiText('工作区文件'), `<div class="workspace-file-loading" role="status"><span class="engine-sprout" aria-hidden="true"><i></i><i></i><i></i></span>${uiText('正在读取文件…')}</div>`);
+    $('dialog').classList.add('workspace-files-dialog');
+  }
   Native.listWorkspaceFiles(String(workspaceBrowser.request), path);
 }
 function workspaceFilesReceived(value) {
+  if (value.status === 'deleted' || value.status === 'delete_error') return fileDeleteReceived(value);
   if (value.status === 'directory') return browseWorkspace(value.data);
   if (value.status === 'listed' || value.status === 'list_error') {
     if (value.request !== String(workspaceBrowser.request) || $('overlay').hidden || !$('dialog').classList.contains('workspace-files-dialog')) return;
     const data = value.status === 'listed' ? value.data : {path:workspaceBrowser.path, entries:[]};
     workspaceBrowser.path = data.path;
+    workspaceBrowser.workspace = data.workspace;
     const parts = data.path.split('/').filter(Boolean);
-    showDialog(uiText('工作区文件'), `<p class="dialog-description">${uiText('这里保存着当前工作区的文件。打开预览，或保存一份到 Downloads。')}</p><nav class="file-breadcrumbs" aria-label="${uiText('文件路径')}"><button data-directory="">${uiText('工作区')}</button>${parts.map((part,i)=>`<span>/</span><button data-directory="${esc(parts.slice(0,i+1).join('/'))}">${esc(part)}</button>`).join('')}<button id="refresh-workspace-files" class="icon-button" aria-label="${uiText('刷新文件')}">${icon('refresh')}</button></nav><div class="workspace-file-list">${value.status==='list_error' ? `<p class="file-empty" role="alert">${uiText('无法读取这个目录。')}</p>` : data.entries.length ? data.entries.map((file,i)=>`<div class="workspace-file-row"><button class="workspace-file-main" data-file-index="${i}"><span class="file-kind">${icon(file.directory?'folder':'file')}</span><span><strong>${esc(file.name)}</strong><small>${file.directory ? uiText('文件夹') : fileSize(file.size)}</small></span>${file.directory?icon('right'):''}</button>${file.directory ? '' : `<button class="icon-button" data-save-file="${i}" aria-label="${uiText('保存到 Downloads')}" title="${uiText('保存到 Downloads')}">${icon('download')}</button><button class="icon-button" data-share-file="${i}" aria-label="${uiText('分享文件')}" title="${uiText('分享文件')}">${icon('share')}</button>`}</div>`).join('') : `<div class="file-empty">${icon('folder')}<p>${uiText('这里还没有文件')}</p><small>${uiText('让 kaipi 创建的文件，会出现在这里。')}</small></div>`}</div><p class="file-status" id="workspace-file-status" role="status">${uiText('文件保留在本机，保存与分享会创建副本。')}</p>`);
+    showDialog(uiText('工作区文件'), `<p class="dialog-description">${uiText('这里保存着当前工作区的文件。打开预览，或保存一份到 Downloads。')}</p><nav class="file-breadcrumbs" aria-label="${uiText('文件路径')}"><button data-directory="">${uiText('工作区')}</button>${parts.map((part,i)=>`<span>/</span><button data-directory="${esc(parts.slice(0,i+1).join('/'))}">${esc(part)}</button>`).join('')}<button id="refresh-workspace-files" class="icon-button" aria-label="${uiText('刷新文件')}">${icon('refresh')}</button></nav><div class="workspace-file-list">${value.status==='list_error' ? `<p class="file-empty" role="alert">${uiText('无法读取这个目录。')}</p>` : data.entries.length ? data.entries.map((file,i)=>`<div class="workspace-file-row"><button class="workspace-file-main" data-file-index="${i}"><span class="file-kind">${icon(file.directory?'folder':'file')}</span><span><strong>${esc(file.name)}</strong><small>${file.directory ? uiText('文件夹') : fileSize(file.size)}</small></span>${file.directory?icon('right'):''}</button>${file.directory ? '' : `<button class="icon-button" data-save-file="${i}" aria-label="${uiText('保存到 Downloads')}" title="${uiText('保存到 Downloads')}">${icon('download')}</button><button class="icon-button" data-share-file="${i}" aria-label="${uiText('分享文件')}" title="${uiText('分享文件')}">${icon('share')}</button><button class="icon-button file-delete-button" data-delete-file="${i}" aria-label="${esc(uiText('删除文件')+' '+file.name)}" title="${uiText('删除文件')}" ${!file.revision || !data.workspace || !window.Native?.deleteWorkspaceFile ? 'disabled' : ''}>${icon('trash')}</button>`}</div>`).join('') : `<div class="file-empty">${icon('folder')}<p>${uiText('这里还没有文件')}</p><small>${uiText('让 kaipi 创建的文件，会出现在这里。')}</small></div>`}</div><p class="file-status" id="workspace-file-status" role="status">${uiText('文件保留在本机，保存与分享会创建副本。')}</p>`);
     $('dialog').classList.add('workspace-files-dialog');
     $('workspace-file-status').insertAdjacentHTML('beforebegin', `<div class="dialog-footer"><button id="save-workspace-directory" class="button">${icon('download')}${uiText('保存文件夹为 ZIP')}</button></div>`);
     $('save-workspace-directory').onclick = () => Native.saveWorkspaceFile(data.path);
@@ -812,11 +821,60 @@ function workspaceFilesReceived(value) {
     });
     $('dialog').querySelectorAll('[data-save-file]').forEach(button=>button.onclick=()=>Native.saveWorkspaceFile(data.entries[Number(button.dataset.saveFile)].path));
     $('dialog').querySelectorAll('[data-share-file]').forEach(button=>button.onclick=()=>Native.shareWorkspaceFile(data.entries[Number(button.dataset.shareFile)].path));
+    $('dialog').querySelectorAll('[data-delete-file]').forEach(button=>button.onclick=()=>confirmFileDelete(data.entries[Number(button.dataset.deleteFile)], button));
+    $('dialog').querySelector('.workspace-file-list').scrollTop = workspaceBrowser.scroll || 0;
     return;
   }
   const status = $('workspace-file-status');
   if (status && !$('overlay').hidden) status.textContent = uiText(value.data);
   else toast(value.data);
+}
+function confirmFileDelete(file, trigger) {
+  if (file.directory || !file.revision || !workspaceBrowser.workspace || !window.Native?.deleteWorkspaceFile) return;
+  clearTimeout(toastTimer); $('toast').hidden = true;
+  const ticket = {id:`file-delete:${++fileDeleteRequest}`,file,trigger,workspace:workspaceBrowser.workspace,directory:workspaceBrowser.path,
+    scroll:$('dialog').querySelector('.workspace-file-list').scrollTop,phase:'confirm',timer:null};
+  fileDelete = ticket;
+  $('file-delete-dialog').innerHTML = `<div class="dialog-header"><h2 id="file-delete-title">${icon('warning')}${uiText('删除这个文件？')}</h2><button id="file-delete-close" class="icon-button" aria-label="${uiText('关闭对话框')}">${icon('close')}</button></div><div class="delete-file-target">${icon('file')}<span><strong>${esc(file.name)}</strong><small>${esc(file.path.includes('/') ? file.path : fileSize(file.size))}</small></span></div><p class="delete-file-warning">${uiText('删除后无法恢复。')}</p><p class="dialog-description">${uiText('文件将从当前工作区中永久删除。')}</p><div id="file-delete-error" class="error-message" role="alert"></div><div class="dialog-footer"><button id="file-delete-cancel" class="button">${uiText('取消')}</button><button id="file-delete-confirm" class="button danger">${uiText('永久删除')}</button></div>`;
+  $('dialog').inert = true; $('dialog').setAttribute('aria-hidden','true');
+  $('file-delete-overlay').hidden = false;
+  $('file-delete-close').onclick = $('file-delete-cancel').onclick = closeFileDelete;
+  $('file-delete-confirm').onclick = () => {
+    if (fileDelete !== ticket || ticket.phase !== 'confirm') return;
+    ticket.phase = 'deleting';
+    for (const id of ['file-delete-confirm','file-delete-cancel','file-delete-close']) $(id).disabled = true;
+    $('file-delete-confirm').textContent = uiText('正在删除…');
+    ticket.timer = setTimeout(() => {
+      if (fileDelete === ticket && ticket.phase === 'deleting') fileDeleteFailed(ticket,uiText('删除结果尚未确认，请返回列表检查。'));
+    },15000);
+    try { Native.deleteWorkspaceFile(ticket.workspace,ticket.id,file.path,file.revision); }
+    catch { fileDeleteFailed(ticket,uiText('无法删除文件，请刷新列表后重试。')); }
+  };
+  requestAnimationFrame(() => { if (fileDelete === ticket && !$('file-delete-dialog').contains(document.activeElement)) $('file-delete-cancel').focus({preventScroll:true}); });
+}
+function closeFileDelete() {
+  const ticket = fileDelete;
+  if (!ticket || ticket.phase === 'deleting') return;
+  clearTimeout(ticket.timer); fileDelete = null;
+  $('file-delete-overlay').hidden = true; $('file-delete-dialog').innerHTML = '';
+  $('dialog').inert = false; $('dialog').removeAttribute('aria-hidden');
+  if (ticket.trigger?.isConnected) ticket.trigger.focus({preventScroll:true}); else $('dialog').focus({preventScroll:true});
+  if (ticket.phase === 'failed' && workspaceBrowser.workspace === ticket.workspace) browseWorkspace(ticket.directory,ticket.scroll);
+}
+function fileDeleteFailed(ticket, message) {
+  clearTimeout(ticket.timer); ticket.phase = 'failed';
+  $('file-delete-error').textContent = uiText(message);
+  $('file-delete-confirm').textContent = uiText('永久删除'); $('file-delete-confirm').disabled = true;
+  $('file-delete-cancel').disabled = $('file-delete-close').disabled = false;
+  $('file-delete-cancel').textContent = uiText('返回列表');
+}
+function fileDeleteReceived(value) {
+  const ticket = fileDelete;
+  if (!ticket || value.request !== ticket.id) return;
+  if (value.status === 'delete_error') { fileDeleteFailed(ticket,value.data); return; }
+  clearTimeout(ticket.timer); ticket.phase = 'done'; closeFileDelete();
+  if (workspaceBrowser.workspace === ticket.workspace && !$('overlay').hidden && $('dialog').classList.contains('workspace-files-dialog')) browseWorkspace(ticket.directory,ticket.scroll);
+  toast(uiText('已删除。'));
 }
 function fileSize(size) {
   if (size < 1024) return `${size} B`;
@@ -856,6 +914,7 @@ async function copy(text) {
   } catch { toast(uiText('复制暂不可用。')); }
 }
 function back() {
+  if (fileDelete) { closeFileDelete(); return true; }
   if (!$('provider-browser')?.hidden && $('provider-browser')) { closeProviderPicker(); return true; }
   if (onboardingStep) return true;
   if (!$('overlay').hidden) closeDialog();
@@ -903,6 +962,7 @@ $('tree-fit').onclick = fitTree;
 $('tree-current').onclick = () => { if (state?.leaf) { collapsed.clear(); renderTree(); centerNode(state.leaf); } };
 $('show-archived').onchange = renderTree;
 $('overlay').onclick = event => { if (event.target === $('overlay')) closeDialog(); };
+$('file-delete-overlay').onclick = event => { if (event.target === $('file-delete-overlay')) closeFileDelete(); };
 $('attach').onclick = () => { fileSession = state?.session; if (window.Native?.pickFile) Native.pickFile(); else $('file-input').click(); };
 $('file-input').onchange = () => { readFiles([...$('file-input').files]); $('file-input').value = ''; };
 document.querySelectorAll('.starter').forEach(button => button.onclick = () => { $('draft').value = button.dataset.prompt; resizeDraft(); updateComposer(); $('draft').focus(); saveDraft(); });
@@ -918,9 +978,12 @@ $('tree-viewport').addEventListener('pointercancel', () => { pointerPan = null; 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); back(); }
   if (event.key === 'Tab' && !$('overlay').hidden) {
-    const focusable = [...$('dialog').querySelectorAll('button:not(:disabled),input:not(:disabled),textarea,select,a[href]')].filter(node => node.offsetParent !== null);
+    const surface = fileDelete ? $('file-delete-dialog') : $('dialog');
+    const focusable = [...surface.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea,select,a[href]')].filter(node => node.offsetParent !== null);
     const first = focusable[0], last = focusable[focusable.length-1];
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === $('dialog'))) { event.preventDefault(); last?.focus(); }
+    if (!first) { event.preventDefault(); surface.focus({preventScroll:true}); }
+    else if (!surface.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === surface)) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
 });
