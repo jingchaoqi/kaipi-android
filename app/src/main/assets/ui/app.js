@@ -789,7 +789,7 @@ function openWorkspaceFile(path, link = false) {
 }
 function browseWorkspace(path = '', scroll = 0) {
   if (!window.Native?.listWorkspaceFiles) return toast(uiText('请在 Android 应用中打开工作区文件。'));
-  const refreshing = !$('overlay').hidden && $('dialog').classList.contains('workspace-files-dialog') && path === workspaceBrowser.path;
+  const refreshing = !$('overlay').hidden && $('dialog').classList.contains('workspace-files-dialog') && $('workspace-file-status') && path === workspaceBrowser.path;
   workspaceBrowser = {request:workspaceBrowser.request+1, path, scroll};
   if (refreshing) {
     $('dialog').querySelectorAll('.workspace-file-list button, #refresh-workspace-files').forEach(button=>button.disabled=true);

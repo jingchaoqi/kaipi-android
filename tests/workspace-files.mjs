@@ -131,6 +131,11 @@ try {
   await page.click('#dialog-close');assert.equal(await page.inputValue('#draft'),'保留我正在写的草稿');
   await page.evaluate(()=>kaipi.receive({event:'workspaceFiles',data:{status:'listed',request:String(fileCalls.list.at(-1).request),data:{path:'old',entries:[]}}}));
   assert.equal(await page.locator('#overlay').isHidden(),true);
+  // Re-entering the same directory while its initial listing is pending keeps a valid loading surface.
+  await page.evaluate(()=>{window.normalFileList=Native.listWorkspaceFiles;Native.listWorkspaceFiles=(request,path)=>fileCalls.list.push({request,path});kaipi.receive({event:'workspaceFiles',data:{status:'directory',data:''}});kaipi.receive({event:'workspaceFiles',data:{status:'directory',data:''}});});
+  await page.waitForSelector('.workspace-file-loading');
+  await page.evaluate(()=>{Native.listWorkspaceFiles=window.normalFileList;const pending=fileCalls.list.at(-1);Native.listWorkspaceFiles(pending.request,pending.path);});
+  assert.equal(await page.locator('.workspace-file-row').count(),6);await page.click('#dialog-close');
   assert.deepEqual(errors,[]);
   console.log('PASS: existing file links, file browsing, folders/breadcrumbs, all-format open/save/share, ZIP actions, escaped names, stale replies, drafts, language, dark theme, confirmation/cancel/back/focus, deletion success/error/timeout, duplicate/stale guards and narrow layout.');
 } finally {if(browser)await browser.close();server.kill();}
