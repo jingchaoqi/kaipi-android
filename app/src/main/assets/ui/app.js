@@ -460,7 +460,7 @@ function showDialog(title, html, wide = false) {
   $('dialog').innerHTML = uiHtml`<div class="dialog-header"><h2 id="dialog-title">${esc(title)}</h2><button id="dialog-close" class="icon-button" aria-label="关闭对话框">${icon('close')}</button></div>${html}`;
   $('dialog-close').onclick = closeDialog;
   $('app').inert = true;
-  requestAnimationFrame(() => { const target = $('dialog').querySelector('input:not([type=radio]),textarea') || $('dialog'); target.focus({preventScroll:true}); });
+  requestAnimationFrame(() => { if (fileDelete) return; const target = $('dialog').querySelector('input:not([type=radio]),textarea') || $('dialog'); target.focus({preventScroll:true}); });
 }
 function updateReceived(next) {
   updateState = next;
@@ -850,7 +850,7 @@ function confirmFileDelete(file, trigger) {
     try { Native.deleteWorkspaceFile(ticket.workspace,ticket.id,file.path,file.revision); }
     catch { fileDeleteFailed(ticket,uiText('无法删除文件，请刷新列表后重试。')); }
   };
-  requestAnimationFrame(() => { if (fileDelete === ticket) $('file-delete-cancel').focus({preventScroll:true}); });
+  requestAnimationFrame(() => { if (fileDelete === ticket && !$('file-delete-dialog').contains(document.activeElement)) $('file-delete-cancel').focus({preventScroll:true}); });
 }
 function closeFileDelete() {
   const ticket = fileDelete;
@@ -982,6 +982,7 @@ document.addEventListener('keydown', event => {
     const focusable = [...surface.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea,select,a[href]')].filter(node => node.offsetParent !== null);
     const first = focusable[0], last = focusable[focusable.length-1];
     if (!first) { event.preventDefault(); surface.focus({preventScroll:true}); }
+    else if (!surface.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
     else if (event.shiftKey && (document.activeElement === first || document.activeElement === surface)) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
