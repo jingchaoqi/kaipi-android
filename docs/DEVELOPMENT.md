@@ -84,7 +84,7 @@ python3 scripts/build-runtime.py --sdk "$ANDROID_HOME"
 ./gradlew :app:assembleDebug :app:lintDebug
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.2，包名与固定签名不变，可覆盖升级。
+APK：`app/build/outputs/apk/debug/app-debug.apk`。版本为 0.2.3，包名与固定签名不变，可覆盖升级。
 
 版本策略：仅在用户明确指定时修改 `versionName` 和 `versionCode`。日常修改、提交与 Actions 构建均保持当前版本；Actions 的运行编号仅用于区分下载产物，不作为应用版本号。
 
