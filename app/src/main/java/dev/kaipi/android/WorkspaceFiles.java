@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.*;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
@@ -25,9 +26,12 @@ final class WorkspaceFiles implements AutoCloseable {
     private String pendingWorkspace, pendingPath;
     WorkspaceFiles(Activity activity, Consumer<JSONObject> publish) { this.activity = activity; this.publish = publish; }
     private void event(String status, String request, Object data) {
+        event(status, request, data, "");
+    }
+    private void event(String status, String request, Object data, String location) {
         activity.runOnUiThread(() -> {
             if (closed) return;
-            try { publish.accept(new JSONObject().put("status", status).put("request", request).put("data", data)); }
+            try { publish.accept(new JSONObject().put("status", status).put("request", request).put("data", data).put("location", location)); }
             catch (JSONException error) { throw new IllegalStateException(error); }
         });
     }
@@ -112,9 +116,9 @@ final class WorkspaceFiles implements AutoCloseable {
                         archive = new File(staging, source.equals(root) ? "kaipi-workspace.zip" : source.getName() + ".zip");
                         WorkspaceStorage.zip(root, source, archive);
                     } else if (!source.isFile()) throw new IOException();
-                    saveDownload(archive == null ? source : archive);
+                    String location = saveDownload(archive == null ? source : archive);
+                    event("saved", "", "已保存到 Downloads。", location);
                 } finally { if (archive != null) archive.delete(); }
-                event("saved", "", "已保存到 Downloads。");
             } catch (Exception error) { event("error", "", "保存失败，请检查可用空间和文件是否存在。"); }
             finally { activity.runOnUiThread(() -> saving = false); }
         });
@@ -126,7 +130,7 @@ final class WorkspaceFiles implements AutoCloseable {
         if (granted) save(workspace, path);
         else event("error", "", "请允许将文件保存到 Downloads，然后重试。");
     }
-    private void saveDownload(File source) throws IOException {
+    private String saveDownload(File source) throws IOException {
         if (Build.VERSION.SDK_INT >= 29) {
             ContentResolver resolver = activity.getContentResolver();
             ContentValues values = new ContentValues();
@@ -146,6 +150,14 @@ final class WorkspaceFiles implements AutoCloseable {
                 if (resolver.update(uri, done, null, null) != 1) throw new IOException();
                 completed = true;
             } finally { if (!completed) resolver.delete(uri, null, null); }
+            // MediaStore may rename a duplicate. Report the published name, not the requested one.
+            try (Cursor cursor = resolver.query(uri, new String[]{MediaStore.Downloads.RELATIVE_PATH, MediaStore.Downloads.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0) && !cursor.isNull(1)) {
+                    String directory = cursor.getString(0);
+                    return directory + (directory.endsWith("/") ? "" : "/") + cursor.getString(1);
+                }
+            } catch (RuntimeException ignored) { /* A missing metadata query must not turn a completed save into a failure. */ }
+            return Environment.DIRECTORY_DOWNLOADS + "/kaipi";
         } else {
             File directory = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "kaipi");
             if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException();
@@ -161,6 +173,7 @@ final class WorkspaceFiles implements AutoCloseable {
             }
             finally { if (!completed) target.delete(); }
             android.media.MediaScannerConnection.scanFile(activity, new String[]{target.getPath()}, new String[]{WorkspaceStorage.mime(source)}, null);
+            return Environment.DIRECTORY_DOWNLOADS + "/kaipi/" + target.getName();
         }
     }
     // Finish a user-requested save even if the preview is closed while it is copying.

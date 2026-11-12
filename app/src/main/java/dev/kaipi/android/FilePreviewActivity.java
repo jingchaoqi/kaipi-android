@@ -2,9 +2,11 @@ package dev.kaipi.android;
 
 import android.app.Activity;
 import android.content.*;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
@@ -25,7 +27,7 @@ public final class FilePreviewActivity extends Activity {
     private boolean english;
     private int ink, surface, accent;
     private String workspace, path;
-    private TextView status;
+    private TextView status, saveButton;
     private boolean visible, running;
     private final java.util.function.Consumer<Boolean> conversationActivity = value -> { running = value; updateScreenAwake(); };
     private void updateScreenAwake() {
@@ -55,13 +57,21 @@ public final class FilePreviewActivity extends Activity {
         TextView title = new TextView(this); title.setText(path == null ? "" : new File(path).getName()); title.setTextSize(14); title.setTextColor(ink); title.setSingleLine(); title.setEllipsize(TextUtils.TruncateAt.MIDDLE); title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         TextView subtitle = new TextView(this); subtitle.setText(english ? "Local preview" : "本地预览"); subtitle.setTextSize(11); subtitle.setTextColor(accent); subtitle.setPadding(0, dp(4), 0, 0);
         labels.addView(title); labels.addView(subtitle); bar.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-        bar.addView(button(english ? "Save" : "保存", english ? "Save to Downloads" : "保存到 Downloads", () -> delivery.save(workspace, path)));
+        saveButton = button(english ? "Save" : "保存", english ? "Save to Downloads" : "保存到 Downloads", () -> delivery.save(workspace, path));
+        bar.addView(saveButton);
         bar.addView(button(english ? "Share" : "分享", english ? "Share file" : "分享文件", () -> delivery.share(workspace, path)));
         page.addView(bar, new LinearLayout.LayoutParams(-1, dp(64)));
         status = new TextView(this); status.setTextSize(11); status.setTextColor(accent); status.setGravity(Gravity.CENTER); status.setSingleLine(); status.setEllipsize(TextUtils.TruncateAt.END);
         delivery = new WorkspaceFiles(this, event -> {
             String value = event.optString("status");
-            status.setText(value.equals("saving") ? (english ? "Saving…" : "正在保存文件…") : value.equals("saved") ? (english ? "Saved to Downloads/kaipi" : "已保存到 Downloads/kaipi") : (english ? "Unable to complete. Check the file, storage and permissions." : event.optString("data")));
+            boolean saving = value.equals("saving");
+            saveButton.setEnabled(!saving); saveButton.setAlpha(saving ? .55f : 1f);
+            saveButton.setText(saving ? (english ? "Saving…" : "保存中…") : (english ? "Save" : "保存"));
+            String message = saving ? (english ? "Saving…" : "正在保存文件…")
+                : value.equals("saved") ? (english ? "Saved to " : "已保存到 ") + event.optString("location", "Downloads/kaipi")
+                : (english ? "Unable to complete. Check the file, storage and permissions." : event.optString("data"));
+            status.setText(message);
+            if (value.equals("saved") || value.equals("error")) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         });
         web = new WebView(this); web.setBackgroundColor(background);
         web.getSettings().setJavaScriptEnabled(true);
@@ -99,11 +109,16 @@ public final class FilePreviewActivity extends Activity {
             }
         } catch (Exception error) { status.setText(english ? "Preview unavailable. You can save or share the file." : "暂时无法预览，可保存或分享文件后打开。"); }
     }
-    private View button(String label, String description, Runnable action) {
+    private TextView button(String label, String description, Runnable action) {
         TextView button = new TextView(this); button.setText(label); button.setContentDescription(description); button.setTextSize(13); button.setTextColor(accent); button.setGravity(Gravity.CENTER); button.setPadding(dp(12), 0, dp(12), 0);
-        GradientDrawable background = new GradientDrawable(); background.setColor(surface); background.setCornerRadius(dp(14)); button.setBackground(background);
+        GradientDrawable background = new GradientDrawable(); background.setColor(surface); background.setCornerRadius(dp(14));
+        GradientDrawable mask = new GradientDrawable(); mask.setColor(Color.WHITE); mask.setCornerRadius(dp(14));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf((accent & 0xffffff) | 0x28000000), background, mask));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(40)); params.setMargins(dp(4), 0, 0, 0); button.setLayoutParams(params);
-        button.setOnClickListener(view -> action.run()); button.setFocusable(true); return button;
+        button.setOnClickListener(view -> {
+            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+            action.run();
+        }); button.setFocusable(true); return button;
     }
     static String url(String path) {
         Uri.Builder builder = Uri.parse(ORIGIN).buildUpon().appendPath("files");
