@@ -10,7 +10,7 @@ try {
  browser=await chromium.launch({executablePath:process.env.CHROMIUM_BIN||undefined,headless:true,args:['--no-sandbox']});
  page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  // Exercise the same missing APIs observed on the installed Android 11 WebView 83.
- await page.addInitScript(()=>{Object.defineProperty(Crypto.prototype,'randomUUID',{value:undefined,configurable:true});Element.prototype.replaceChildren=undefined;});
+ await page.addInitScript(()=>{Object.defineProperty(Crypto.prototype,'randomUUID',{value:undefined,configurable:true});Element.prototype.replaceChildren=undefined;Array.prototype.at=undefined;});
  const errors=[],turns=[],retries=[];
  page.on('pageerror',error=>errors.push(error.message));
  page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/rpc')){const b=r.postDataJSON();if(b.op==='turn')turns.push(b);if(b.op==='retry')retries.push(b);}});
