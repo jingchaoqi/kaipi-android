@@ -4,6 +4,13 @@
 // Strings (including large attachment data) are immutable; copy containers without re-encoding them.
 const clone = value => Array.isArray(value) ? value.map(clone) : value && typeof value === 'object'
   ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)])) : value;
+function id() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+}
 const position = s => JSON.stringify([s.leaf ?? null, s.trunk ?? null, s.pending || []]);
 const empty = session => ({version:1,session,items:[],turn:null,anchor:null,paused:'',expanded:true});
 function valid(q, session) {
@@ -41,7 +48,7 @@ async function write(q) {
 function begin(q, snapshot, body, retry = false) {
   const prior = q.turn;
   const same = retry && prior && prior.attemptId === snapshot.latest_attempt?.id && prior.status === 'failed';
-  q.turn = {token:crypto.randomUUID(),body:clone(body),attempts:same ? prior.attempts + 1 : retry && ['aborted','tombstone'].includes(snapshot.latest_attempt?.status) ? 2 : 1,
+  q.turn = {token:id(),body:clone(body),attempts:same ? prior.attempts + 1 : retry && ['aborted','tombstone'].includes(snapshot.latest_attempt?.status) ? 2 : 1,
     before:snapshot.latest_attempt?.id || null, attemptId:null,
     parent:retry ? snapshot.latest_attempt.parent_id : snapshot.leaf,
     status:'sending',stop:false};
@@ -73,5 +80,5 @@ function observe(q, s, recover = false) {
   if (q.paused === 'unknown') q.paused = '';
   return false;
 }
-window.KaipiOutbox = {clone,position,empty,read,write,begin,observe};
+window.KaipiOutbox = {id,clone,position,empty,read,write,begin,observe};
 })();

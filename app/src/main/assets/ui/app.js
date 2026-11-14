@@ -127,7 +127,7 @@ function syncQueue(snapshot, recover = false) {
   const before = JSON.stringify([q.turn?.status,q.turn?.attemptId,q.anchor,q.paused]);
   if (!q.turn && snapshot.busy && snapshot.latest_attempt) {
     const a = snapshot.latest_attempt;
-    q.turn = {token:crypto.randomUUID(),body:{text:a.input,attachments:[],explore:false},attempts:1,before:null,attemptId:a.id,parent:a.parent_id,status:'running',stop:false};
+    q.turn = {token:Q.id(),body:{text:a.input,attachments:[],explore:false},attempts:1,before:null,attemptId:a.id,parent:a.parent_id,status:'running',stop:false};
   }
   Q.observe(q, snapshot, recover);
   if (q.turn?.status === 'failed' && q.turn.attempts >= 3 && q.exhaustedNotice !== q.turn.token) {
@@ -150,7 +150,7 @@ async function advanceQueue() {
 function renderQueue() {
   const q = currentQueue(), count = q?.items.length || 0;
   $('message-queue').hidden = !count;
-  if (!count) { $('queue-items').replaceChildren(); $('queue-items').dataset.entries = ''; $('queue-hint').textContent = ''; }
+  if (!count) { $('queue-items').textContent = ''; $('queue-items').dataset.entries = ''; $('queue-hint').textContent = ''; }
   if (count) {
     const paused = q.paused || q.turn?.status === 'failed' || q.turn?.status === 'unknown';
     $('queue-label').textContent = `${uiText(paused ? '队列已暂停' : '待发送')} · ${count} / 3`;
@@ -381,7 +381,7 @@ async function send(event) {
   const submitted = {text, attachments: attachments.slice(), explore};
   if (queueMode()) {
     if (q.items.length >= 3) return toast(uiText('最多排队 3 条，草稿仍会保留。'));
-    const item = {id:crypto.randomUUID(),body:Q.clone(submitted)}, revision = draftRevision;
+    const item = {id:Q.id(),body:Q.clone(submitted)}, revision = draftRevision;
     q.items.push(item);
     let cleared;
     try { const saved = saveQueue(q); clearSubmittedDraft(revision); cleared = draftRevision; updateComposer(); await saved; toast(uiText('已加入队列。')); }
@@ -410,7 +410,7 @@ async function submitTurn(body, {item = null, revision = null, retry = false} = 
     Object.assign(q,previous,{storageFailed:true,paused:'storage'}); sending = false; activeSubmission = null; live = null;
     if (revision !== null) {
       if (draftRevision === cleared) restoreBody(body);
-      else q.items.push({id:crypto.randomUUID(),body:Q.clone(body)});
+      else q.items.push({id:Q.id(),body:Q.clone(body)});
     }
     updateComposer(); renderHistory(); fail(error); return;
   }

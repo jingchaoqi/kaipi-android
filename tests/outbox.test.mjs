@@ -7,6 +7,13 @@ vm.runInNewContext(readFileSync(new URL('../app/src/main/assets/ui/outbox.js',im
 const Q=host.window.KaipiOutbox;
 const snapshot=(latest=null,extra={})=>({session:'s',leaf:null,trunk:null,pending:[],busy:false,latest_attempt:latest,...extra});
 const body={text:'A',attachments:[{name:'original.txt',data:'frozen'}],explore:false};
+test('older Android WebViews use secure version-4 IDs without crypto.randomUUID',()=>{
+ const legacy={window:{},crypto:{getRandomValues:globalThis.crypto.getRandomValues.bind(globalThis.crypto)}};
+ vm.runInNewContext(readFileSync(new URL('../app/src/main/assets/ui/outbox.js',import.meta.url),'utf8'),legacy);
+ const ids=Array.from({length:256},()=>legacy.window.KaipiOutbox.id());
+ assert.equal(new Set(ids).size,256);
+ for(const id of ids)assert.match(id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
 test('a queued dependency advances only for an identified successful attempt at its current leaf',()=>{
  const q=Q.empty('s');Q.begin(q,snapshot(),body);
  assert.equal(Q.observe(q,snapshot({id:'a',parent_id:null,input:'A',status:'live'},{busy:true})),false);

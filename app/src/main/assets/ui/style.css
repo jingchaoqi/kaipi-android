@@ -134,7 +134,7 @@ body,.app,.main,.sidebar,.context-panel,.composer,.dialog,.tool,.tree-node{trans
 @media(prefers-reduced-motion:reduce){.message-queue{animation:none}.message-queue-head>button:first-child>svg:last-child{transition:none}}
 /* Notifications must not cover the independent stop and submit targets. */
 .toast{pointer-events:none}
-#queue-items{max-height:min(180px,23dvh);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+#queue-items{max-height:180px;max-height:min(180px,23vh);max-height:min(180px,23dvh);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .queued-message.entering{animation:queue-enter .2s var(--ease)}
 @media(prefers-reduced-motion:reduce){.queued-message.entering{animation:none}}
 .message-queue-head>button:first-child{color:var(--accent-text)}
