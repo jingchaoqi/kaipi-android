@@ -23,6 +23,8 @@ try {
 
  // One active request + three pending. A fourth draft is never sent automatically.
  await send('queue-order A');await page.waitForSelector('#live-turn');
+ const controls=await page.evaluate(()=>['stop-generation','send'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {width:r.width,height:r.height,top:r.top};}));
+ assert.equal(controls[0].width,44);assert.equal(controls[0].height,44);assert.equal(controls[1].height,44);assert.equal(controls[0].top,controls[1].top);
  for(const text of ['queue-order B','queue-order C','queue-order D'])await send(text);
  await queueCount(3);await page.fill('#draft','这只是未提交的草稿');
  assert.equal(await page.getAttribute('#send','aria-label'),'队列已满');assert.equal(await page.locator('#send').isDisabled(),true);
