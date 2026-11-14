@@ -36,6 +36,7 @@ class RuntimePackageTest(unittest.TestCase):
                          'APK signing certificate changed; existing installs must remain upgradeable.')
 
     def test_gui_entry_and_assets_replace_the_terminal(self):
+        self.assertIn('assets/ui/outbox.js', self.names)
         for name in ['index.html', 'app.js', 'model.js', 'theme.js', 'style.css', 'render.js', 'locale.js', 'kaipi-logo.svg', 'kaipi-logo-dark.svg', 'vendor/marked.js']:
             self.assertIn('assets/ui/' + name, self.names)
         self.assertFalse(any(name.startswith('assets/terminal/') for name in self.names))

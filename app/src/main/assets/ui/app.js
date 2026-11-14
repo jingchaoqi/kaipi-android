@@ -3,6 +3,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const M = window.KaipiModel;
+const Q = window.KaipiOutbox;
+const outboxes = new Map(), queueLoads = new Map();
+let queueWrites = Promise.resolve(), queueWriting = 0, queueTimer = 0, draftRevision = 0;
 const {text:uiText,html:uiHtml} = window.KaipiLocale;
 const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -45,7 +48,7 @@ function rejectPending(text) {
 function receive(json) {
   let message;
   try { message = typeof json === 'string' ? JSON.parse(json) : json; } catch { return; }
-  if (message.id === 'reconnect') { connected = true; if (!message.result?.busy) { live = null; sending = false; } stateReceived(message.result); $('connection').hidden = true; return; }
+  if (message.id === 'reconnect') { connected = true; if (!message.result?.busy) { live = null; sending = false; } stateReceived(message.result, true); $('connection').hidden = true; return; }
   if (message.id && pendingRequests.has(String(message.id))) {
     const task = pendingRequests.get(String(message.id)); pendingRequests.delete(String(message.id)); clearTimeout(task.timer);
     if (message.error) task.reject(new Error(message.error)); else task.resolve(message.result);
@@ -57,11 +60,14 @@ function receive(json) {
       break;
     case 'ready':
       if (message.protocol !== 1) return disconnected(uiText('运行时版本不兼容，请更新应用。'));
-      connected = true; live = null; sending = false; activeSubmission = null; $('connection').hidden = true; stateReceived(message.data); break;
+      connected = true; live = null; sending = false; activeSubmission = null; $('connection').hidden = true; stateReceived(message.data, true); break;
     case 'settled': {
+      if (state && message.data.session !== state.session) break;
+      const turn = currentQueue()?.turn;
+      if (turn && ['sending','running'].includes(turn.status) && message.data.latest_attempt?.id === turn.before) break;
       const error = live && live.error;
       if (activeSubmission) activeSubmission.settled = true;
-      live = null; sending = false; stateReceived(message.data);
+      live = null; sending = false; stateReceived(message.data, true);
       if (error && !unfinishedAttempt()) toast(error);
       break;
     }
@@ -79,6 +85,8 @@ function receive(json) {
   }
 }
 function disconnected(text) {
+  const q = currentQueue();
+  if (q && (q.items.length || ['sending','running'].includes(q.turn?.status))) { q.paused = 'unknown'; saveQueue(q).catch(fail); }
   connected = false; sending = false; activeSubmission = null; rejectPending(text); updateComposer();
   if (live) live.phase = uiText('连接已中断，请重新连接检查结果。');
   if (state) renderHistory();
@@ -92,16 +100,129 @@ function saveDraft() {
   drafts[state.session] = {text: $('draft').value, attachments, explore};
   try { localStorage.setItem('kaipi.drafts', JSON.stringify(Object.fromEntries(Object.entries(drafts).map(([id, draft]) => [id, {text: draft.text, explore: draft.explore}])))); } catch { }
 }
-function stateReceived(next) {
+function currentQueue() { return state ? outboxes.get(state.session) : null; }
+function queueMode() { return !!(state?.busy || sending || currentQueue()?.items.length); }
+function saveQueue(q) {
+  queueWriting++;
+  // Read the latest record when this serialized write starts. A failed edit must not be
+  // reintroduced later by a previously queued snapshot of the same session.
+  const written = queueWrites.catch(() => {}).then(() => { const copy = Q.clone(q); delete copy.storageFailed; return Q.write(copy); });
+  const saved = written.then(() => { q.storageFailed = false; }, () => { q.storageFailed = true; q.paused = 'storage'; throw new Error(uiText('无法保存排队消息，请取回编辑后重试。')); })
+    .finally(() => { queueWriting--; if (currentQueue() === q) { updateComposer(); renderHeader(); renderSessions(); if (!state.busy && !sending) renderHistory(); } scheduleQueue(); });
+  queueWrites = saved;
+  return saved;
+}
+function syncQueue(snapshot, recover = false) {
+  const q = outboxes.get(snapshot.session);
+  if (!q) {
+    if (!queueLoads.has(snapshot.session)) {
+      const loading = Q.read(snapshot.session).then(value => {
+        outboxes.set(snapshot.session, value);
+        if (state?.session === snapshot.session) { syncQueue(state, true); renderHistory(); updateComposer(); }
+      }).catch(error => { toast(uiText('无法读取排队消息，请重新打开应用后重试。')); });
+      queueLoads.set(snapshot.session, loading);
+    }
+    return;
+  }
+  const before = JSON.stringify([q.turn?.status,q.turn?.attemptId,q.anchor,q.paused]);
+  if (!q.turn && snapshot.busy && snapshot.latest_attempt) {
+    const a = snapshot.latest_attempt;
+    q.turn = {token:Q.id(),body:{text:a.input,attachments:[],explore:false},attempts:1,before:null,attemptId:a.id,parent:a.parent_id,status:'running',stop:false};
+  }
+  Q.observe(q, snapshot, recover);
+  if (q.turn?.status === 'failed' && q.turn.attempts >= 3 && q.exhaustedNotice !== q.turn.token) {
+    q.exhaustedNotice = q.turn.token;
+    toast(uiText('已尝试 3 次仍未完成。建议取消后续排队消息，修改当前指令后再试。'));
+  }
+  if (before !== JSON.stringify([q.turn?.status,q.turn?.attemptId,q.anchor,q.paused])) saveQueue(q).catch(fail);
+  scheduleQueue();
+}
+function scheduleQueue() {
+  if (queueTimer) return;
+  queueTimer = setTimeout(() => { queueTimer = 0; advanceQueue().catch(fail); }, 0);
+}
+async function advanceQueue() {
+  const q = currentQueue();
+  if (!q || !connected || sending || state.busy || queueWriting || q.storageFailed || q.paused || !q.items.length || q.turn?.status !== 'succeeded' || !$('overlay').hidden || onboardingStep) return;
+  if (Q.position(state) !== q.anchor) { q.paused = 'context'; await saveQueue(q); return; }
+  await submitTurn(q.items[0].body, {item:q.items[0]});
+}
+function renderQueue() {
+  const q = currentQueue(), count = q?.items.length || 0;
+  $('message-queue').hidden = !count;
+  if (!count) { $('queue-items').textContent = ''; $('queue-items').dataset.entries = ''; $('queue-hint').textContent = ''; }
+  if (count) {
+    const paused = q.paused || q.turn?.status === 'failed' || q.turn?.status === 'unknown';
+    $('queue-label').textContent = `${uiText(paused ? '队列已暂停' : '待发送')} · ${count} / 3`;
+    $('queue-toggle').setAttribute('aria-expanded', String(q.expanded));
+    $('queue-items').hidden = !q.expanded;
+    const entries = [KaipiLocale.current().language,...q.items.map(item=>item.id)].join(':');
+    if ($('queue-items').dataset.entries !== entries) {
+      const focus = document.activeElement?.dataset.takeQueued, top = $('queue-items').scrollTop;
+      const existing = new Set([...$('queue-items').querySelectorAll('[data-queued-id]')].map(n=>n.dataset.queuedId));
+      $('queue-items').innerHTML = q.items.map((item,index) => `<div class="queued-message${existing.has(item.id) ? '' : ' entering'}" data-queued-id="${esc(item.id)}"><span class="queued-order">${index + 1}</span><span class="queued-content"><span>${esc(item.body.text || uiText('附件消息'))}</span>${item.body.attachments.length ? `<small>${icon('paperclip')}${item.body.attachments.length} ${uiText('个附件')}</small>` : ''}</span><button type="button" class="icon-button" data-take-queued="${esc(item.id)}" aria-label="${esc(uiText('取回编辑') + ' · ' + (item.body.text || uiText('附件消息')))}">${icon('close')}</button></div>`).join('');
+      $('queue-items').dataset.entries = entries; $('queue-items').scrollTop = top;
+      if (focus) $('queue-items').querySelector(`[data-take-queued="${CSS.escape(focus)}"]`)?.focus({preventScroll:true});
+    }
+    $('queue-items').querySelectorAll('button').forEach(button=>{button.disabled=queueWriting>0;});
+    $('queue-hint').textContent = uiText(q.paused === 'context' ? '上下文已变化，请回到原位置后继续，或取回编辑。' : q.paused === 'storage' ? '无法保存排队消息，请取回编辑后重试。' : q.turn?.status === 'unknown' || q.paused === 'unknown' ? '正在等待确认运行状态，消息不会重复发送。' : q.turn?.status === 'failed' ? '只有当前指令成功，才继续执行后续消息。' : count === 3 ? '最多排队 3 条，草稿仍会保留。' : '本轮完成后，自动发送最早的一条。');
+    $('queue-resume').hidden = !q.paused || q.turn?.status !== 'succeeded' || state.busy || Q.position(state) !== q.anchor;
+  }
+  const unknown = q?.turn?.status === 'unknown' && !state?.busy;
+  $('queue-recovery').hidden = !unknown;
+  $('queue-recovery').innerHTML = unknown ? `<span>${uiText('无法确认上一条是否已执行，先取回检查，避免重复发送。')}</span><button type="button" id="take-uncertain" class="text-button">${uiText(q.items.length ? '取消排队并取回原指令' : '取回编辑')}</button>` : '';
+}
+function markDraftChanged() { draftRevision++; }
+function clearSubmittedDraft(revision) {
+  if (draftRevision !== revision) return;
+  $('draft').value = ''; attachments = []; markDraftChanged(); resizeDraft(); renderAttachments(); saveDraft();
+}
+function restoreBody(body) {
+  $('draft').value = body.text; attachments = Q.clone(body.attachments); explore = body.explore;
+  markDraftChanged(); resizeDraft(); renderAttachments(); renderHeader(); saveDraft();
+  requestAnimationFrame(() => { $('draft').focus(); $('draft').setSelectionRange($('draft').value.length, $('draft').value.length); });
+}
+function replaceDraft(action) {
+  if ($('draft').value.trim() || attachments.length) confirmDialog(uiText('替换当前草稿？'), uiText('取回后将替换输入框中的文字与附件。取消会保留草稿和排队消息。'), uiText('取回并替换'), action);
+  else action().catch(fail);
+}
+function takeQueued(id) {
+  const q = currentQueue(); if (!q || queueWriting) return;
+  replaceDraft(async () => {
+    if (currentQueue() !== q || queueWriting) throw new Error(uiText('会话状态已变化，请重新确认。'));
+    const index = q.items.findIndex(item => item.id === id); if (index < 0) throw new Error(uiText('这条消息已开始执行，无法取回。'));
+    const [item] = q.items.splice(index, 1);
+    try { await saveQueue(q); } catch (error) { q.items.splice(index,0,item); updateComposer(); throw error; }
+    if (currentQueue() !== q) throw new Error(uiText('会话状态已变化，请重新确认。'));
+    restoreBody(item.body);
+  });
+}
+function rewriteQueuedTurn(uncertain = false) {
+  const q = currentQueue(); if (!q?.turn || state.busy || sending || queueWriting) return;
+  replaceDraft(async () => {
+    if (currentQueue() !== q || state.busy || sending || queueWriting) throw new Error(uiText('会话状态已变化，请重新确认。'));
+    const old = Q.clone(q), body = q.turn.body;
+    q.items = []; if (uncertain) q.turn = null; q.paused = ''; q.anchor = Q.position(state);
+    try { await saveQueue(q); } catch (error) { Object.assign(q,old,{storageFailed:true,paused:'storage'}); updateComposer(); throw error; }
+    restoreBody(body); renderHistory();
+    toast(uiText(uncertain ? '原指令已取回，请检查结果后再发送。' : '已取消后续排队消息，可修改原指令后重新发送。'));
+  });
+}
+function stateReceived(next, recover = false) {
   if (!next || !next.nodes) return;
   const changed = state && next.session !== state.session;
   const follow = nearBottom() || !state || changed;
-  if (changed) { saveDraft(); live = null; sending = false; activeSubmission = null; selected = null; collapsed.clear(); }
+  if (changed) {
+    const previous = currentQueue();
+    if (previous?.items.length) { previous.paused = 'context'; saveQueue(previous).catch(fail); }
+    saveDraft(); live = null; sending = false; activeSubmission = null; selected = null; collapsed.clear();
+  }
   if (pendingAppearance && connected) {
     const value = pendingAppearance; pendingAppearance = null; next.appearance = value;
     request('appearance', value).catch(error => { pendingAppearance = value; fail(error); });
   }
   state = next;
+  syncQueue(next, recover);
   if (next.busy && !live && next.latest_attempt) {
     const attempt = next.latest_attempt;
     live = {text:attempt.input,content:[],phase:uiText('任务仍在运行…'),retryTarget:attempt.parent_id !== next.leaf ? next.leaf : null};
@@ -136,8 +257,8 @@ function renderHeader() {
   $('cursor-chip').innerHTML = `<span class="status-dot"></span><span>${node ? `${esc(node.label)} · ${onTrunk ? uiText('主干') : uiText('探索分支')}` : uiText('新的起点')}</span>${icon('down')}`;
   $('context-size').textContent = uiHtml`主干上下文 ${M.tokens(state.burden)} tokens`;
   $('spend').textContent = state.cost > 0 ? uiHtml`累计 $${Number(state.cost).toFixed(4)}` : uiText('kaipi · 本地运行');
-  $('new-chat').disabled = state.busy;
-  $('rename').disabled = state.busy;
+  $('new-chat').disabled = state.busy || sending || queueWriting > 0;
+  $('rename').disabled = state.busy || sending;
   $('welcome').hidden = !empty || !!live;
 }
 function renderSessions() {
@@ -145,7 +266,7 @@ function renderSessions() {
   const query = $('session-search').value.trim().toLowerCase();
   const sessions = state.sessions.filter(s => s.name.toLowerCase().includes(query));
   $('session-count').textContent = state.sessions.length;
-  $('sessions').innerHTML = sessions.length ? sessions.map(s => `<button class="session-item ${s.current ? 'active' : ''}" data-session="${esc(s.id)}" ${state.busy ? 'disabled' : ''} ${s.current ? 'aria-current="page"' : ''}>${icon('chat')}<span>${esc(s.name || uiText('新的对话'))}</span><small>${s.turns || ''}</small></button>`).join('') : `<p class="session-empty">${query ? uiText('没有找到这个对话') : uiText('新的思路，会留在这里。')}</p>`;
+  $('sessions').innerHTML = sessions.length ? sessions.map(s => `<button class="session-item ${s.current ? 'active' : ''}" data-session="${esc(s.id)}" ${state.busy || sending || queueWriting ? 'disabled' : ''} ${s.current ? 'aria-current="page"' : ''}>${icon('chat')}<span>${esc(s.name || uiText('新的对话'))}</span><small>${s.turns || ''}</small></button>`).join('') : `<p class="session-empty">${query ? uiText('没有找到这个对话') : uiText('新的思路，会留在这里。')}</p>`;
 }
 function contentHTML(content) {
   let html = '';
@@ -166,10 +287,14 @@ function unfinishedAttempt() {
 }
 function retryControl(attempt, prominent = false) {
   if (!state.retryable || attempt.id !== state.latest_attempt?.id) return '';
-  return `<button type="button" data-retry-turn="${esc(attempt.id)}" class="${prominent ? 'retry-button' : 'icon-button'}" ${!connected || sending || state.busy ? 'disabled' : ''} aria-label="${uiText('重新运行上一轮')}" title="${uiText('使用当前模型重新运行上一轮')}">${icon('refresh')}${prominent ? uiText('重试') : ''}</button>`;
+  const turn = currentQueue()?.turn, failed = turn?.attemptId === attempt.id && turn.status === 'failed';
+  if (failed && turn.attempts >= 3) return `<button type="button" class="retry-button" data-rewrite-queued ${!connected || sending || state.busy || queueWriting ? 'disabled' : ''}>${uiText(currentQueue().items.length ? '取消排队并修改指令' : '修改指令')}</button>`;
+  return `<button type="button" data-retry-turn="${esc(attempt.id)}" class="${prominent ? 'retry-button' : 'icon-button'}" ${!connected || sending || state.busy || queueWriting || !currentQueue() ? 'disabled' : ''} aria-label="${uiText('重新运行上一轮')}" title="${uiText('使用当前模型重新运行上一轮')}">${icon('refresh')}${prominent ? uiText('重试') : ''}</button>${prominent && failed ? `<span class="retry-remaining">${uiText('还可重试')} ${3-turn.attempts} ${uiText('次')}</span>` : ''}`;
 }
 function unfinishedHTML(attempt) {
-  return `<article class="turn unfinished-turn" data-turn="${esc(attempt.id)}"><div class="turn-question"><div class="question-bubble">${esc(attempt.input || uiText('未完成的请求'))}</div></div>${assistantMeta(attempt.label,attempt.id)}<div class="retry-panel" role="status"><div class="retry-heading">${icon('refresh')}<strong>${uiText('这轮未完成')}</strong></div><p>${uiText(state.retryable ? '可以从原始问题重新运行，旧尝试保留在树中。' : '当前状态无法重试，可在树中查看此轮。')}</p>${attempt.attachments ? `<span class="retry-attachment">${icon('paperclip')}${uiText('原附件会一并恢复。')}</span>` : ''}${state.turn_error ? `<details class="retry-details"><summary>${uiText('查看原因')}</summary><pre>${esc(uiText(state.turn_error))}</pre></details>` : ''}${attempt.content.length ? `<details class="retry-details"><summary>${uiText('查看本次输出')}</summary>${contentHTML(attempt.content)}</details>` : ''}<div class="retry-footer">${retryControl(attempt,true)}<span class="retry-model">${uiText('当前模型')} · ${esc(state.status?.model || state.model)}</span><button type="button" class="retry-tree icon-button" data-node="${esc(attempt.id)}" aria-label="${uiText('在上下文树中查看')}">${icon('tree')}</button></div></div></article>`;
+  const turn = currentQueue()?.turn, tracked = turn?.attemptId === attempt.id;
+  const explanation = tracked && turn.attempts >= 3 ? '重试 2 次后仍未完成，可修改原指令后再试。' : state.retryable ? '可以从原始问题重新运行，旧尝试保留在树中。' : '当前状态无法重试，可在树中查看此轮。';
+  return `<article class="turn unfinished-turn" data-turn="${esc(attempt.id)}"><div class="turn-question"><div class="question-bubble">${esc(attempt.input || uiText('未完成的请求'))}</div></div>${assistantMeta(attempt.label,attempt.id)}<div class="retry-panel" role="status"><div class="retry-heading">${icon('refresh')}<strong>${uiText('这轮未完成')}</strong>${tracked ? `<span class="retry-remaining">${turn.attempts} / 3</span>` : ''}</div><p>${uiText(explanation)}</p>${attempt.attachments ? `<span class="retry-attachment">${icon('paperclip')}${uiText('原附件会一并恢复。')}</span>` : ''}${state.turn_error ? `<details class="retry-details"><summary>${uiText('查看原因')}</summary><pre>${esc(uiText(state.turn_error))}</pre></details>` : ''}${attempt.content.length ? `<details class="retry-details"><summary>${uiText('查看本次输出')}</summary>${contentHTML(attempt.content)}</details>` : ''}<div class="retry-footer">${retryControl(attempt,true)}<span class="retry-model">${uiText('当前模型')} · ${esc(state.status?.model || state.model)}</span><button type="button" class="retry-tree icon-button" data-node="${esc(attempt.id)}" aria-label="${uiText('在上下文树中查看')}">${icon('tree')}</button></div></div></article>`;
 }
 function renderHistory() {
   if (!state) return;
@@ -231,30 +356,68 @@ function updateComposer() {
   $('context-size').hidden = !connected || !state?.configured;
   $('provider-reminder').hidden = !connected || !!state?.configured;
   const busy = !!(state?.busy || sending);
-  $('send').disabled = !connected || (!busy && !$('draft').value.trim() && !attachments.length);
-  $('send').classList.toggle('stopping', busy);
-  $('send').innerHTML = icon(busy ? 'stop' : 'arrow');
-  $('send').setAttribute('aria-label', busy ? uiText('停止生成') : uiText('发送消息'));
+  const q = currentQueue(), queued = queueMode(), full = q?.items.length >= 3;
+  $('composer').setAttribute('aria-busy', String(!q || queueWriting > 0));
+  $('send').disabled = !connected || !q || queueWriting > 0 || full || (!$('draft').value.trim() && !attachments.length) || q?.turn?.status === 'unknown';
+  $('send').classList.remove('stopping');
+  $('send').classList.toggle('queue-send', queued);
+  $('send').innerHTML = (queued ? `<span>${uiText(full ? '队列已满' : '加入队列')}</span>` : '') + icon('arrow');
+  $('send').setAttribute('aria-label', uiText(full ? '队列已满' : queued ? '加入队列' : '发送消息'));
+  $('stop-generation').hidden = !busy;
+  $('stop-generation').disabled = !connected || !!q?.turn?.stop || (sending && !activeSubmission?.dispatched);
   $('explore-toggle').setAttribute('aria-pressed', String(explore));
-  $('explore-toggle').disabled = busy;
-  $('attach').disabled = busy || !connected;
-  $('draft').placeholder = busy ? uiText('正在生成，你也可以先写下一个想法…') : uiText('写下你的想法…');
+  $('explore-toggle').disabled = busy || !!q?.items.length;
+  $('attach').disabled = !connected;
+  $('draft').placeholder = full ? uiText('仍可编辑，队列空出后再提交…') : queued ? uiText('继续输入，稍后依次发送…') : uiText('写下你的想法…');
+  renderQueue();
 }
 async function send(event) {
   event.preventDefault();
-  if (state?.busy || sending) { await request('stop').catch(fail); return; }
+  const q = currentQueue();
+  if (!connected || !q || queueWriting || q.turn?.status === 'unknown') return;
   const text = $('draft').value.trim();
   if (!text && !attachments.length) return;
   if (!state.configured) { toast(uiText('先连接一个模型，让对话开始。')); openSettings(); return; }
   const submitted = {text, attachments: attachments.slice(), explore};
-  const ticket = {}; activeSubmission = ticket;
-  sending = true; updateComposer();
-  live = {text: text || submitted.attachments.map(a => a.name).join('、'), content: [], phase: uiText('正在准备上下文')};
-  $('welcome').hidden = true; renderHistory(); scrollBottom();
+  if (queueMode()) {
+    if (q.items.length >= 3) return toast(uiText('最多排队 3 条，草稿仍会保留。'));
+    const item = {id:Q.id(),body:Q.clone(submitted)}, revision = draftRevision;
+    q.items.push(item);
+    let cleared;
+    try { const saved = saveQueue(q); clearSubmittedDraft(revision); cleared = draftRevision; updateComposer(); await saved; toast(uiText('已加入队列。')); }
+    catch (error) {
+      if (draftRevision === cleared) { q.items = q.items.filter(i => i.id !== item.id); restoreBody(submitted); }
+      updateComposer(); fail(error);
+    }
+    return;
+  }
+  await submitTurn(submitted, {revision:draftRevision});
+}
+async function submitTurn(body, {item = null, revision = null, retry = false} = {}) {
+  const q = currentQueue();
+  if (!q || sending || state.busy || !connected || queueWriting) return;
+  const previous = Q.clone(q), session = state.session;
+  if (!q.items.length && !item) q.paused = '';
+  const turn = Q.begin(q, state, body, retry);
+  if (item) { if (q.items[0]?.id !== item.id) return; q.items.shift(); }
+  const ticket = {session,token:turn.token}; activeSubmission = ticket;
+  sending = true;
+  live = {text:body.text || body.attachments.map(a=>a.name).join('、'),content:[],phase:uiText(retry ? '正在重新准备上下文' : '正在准备上下文'),retryTarget:retry ? turn.before : null};
+  $('welcome').hidden = true; renderHistory(); renderHeader(); renderSessions(); scrollBottom();
+  let cleared;
+  try { const saved = saveQueue(q); if (revision !== null) clearSubmittedDraft(revision); cleared = draftRevision; updateComposer(); await saved; }
+  catch (error) {
+    Object.assign(q,previous,{storageFailed:true,paused:'storage'}); sending = false; activeSubmission = null; live = null;
+    if (revision !== null) {
+      if (draftRevision === cleared) restoreBody(body);
+      else q.items.push({id:Q.id(),body:Q.clone(body)});
+    }
+    updateComposer(); renderHistory(); fail(error); return;
+  }
+  if (state.session !== session || currentQueue() !== q) { q.turn.status = 'unknown'; q.paused = 'unknown'; await saveQueue(q); return; }
+  ticket.dispatched = true; updateComposer();
   try {
-    await request('turn', submitted);
-    if (activeSubmission !== ticket) return;
-    if ($('draft').value.trim() === text) { $('draft').value = ''; attachments = []; resizeDraft(); renderAttachments(); saveDraft(); }
+    await request(retry ? 'retry' : 'turn', retry ? {} : body);
   } catch (error) {
     if (activeSubmission !== ticket || ticket.settled) return;
     await reconcileTurnRequest(ticket);
@@ -268,7 +431,7 @@ async function reconcileTurnRequest(ticket) {
     if (activeSubmission !== ticket || ticket.settled) return;
     sending = false;
     if (!next.busy) live = null;
-    stateReceived(next);
+    stateReceived(next, true);
   } catch {
     if (activeSubmission === ticket && !ticket.settled) disconnected(uiText('无法确认运行状态，请重新连接。'));
   }
@@ -279,24 +442,23 @@ async function retryLatest() {
   if (!state?.retryable || !state.latest_attempt) return;
   if (!state.configured) { toast(uiText('先连接一个模型，让对话开始。')); openSettings(); return; }
   const attempt = state.latest_attempt;
+  const q = currentQueue(), known = q?.turn?.attemptId === attempt.id, tracked = known && q.turn.status === 'failed';
+  if (!q || queueWriting) return;
+  if (tracked && q.turn.attempts >= 3) return toast(uiText('已尝试 3 次仍未完成。建议取消后续排队消息，修改当前指令后再试。'));
   const submit = async () => {
     if (!connected || sending || state?.busy || !state?.retryable || state.latest_attempt?.id !== attempt.id) throw new Error(uiText('会话状态已变化，请重新确认。'));
-    const ticket = {}; activeSubmission = ticket;
-    sending = true;
-    live = {text:attempt.input,content:[],phase:uiText('正在重新准备上下文'),retryTarget:attempt.id};
-    updateComposer(); renderHistory(); scrollBottom();
-    try { await request('retry'); }
-    catch (error) {
-      if (activeSubmission !== ticket || ticket.settled) return;
-      await reconcileTurnRequest(ticket);
-      if (activeSubmission === ticket && !ticket.settled) throw error;
-    }
+    await submitTurn(known ? q.turn.body : {text:attempt.input,attachments:[],explore}, {retry:true});
   };
   if (attempt.has_tools || attempt.status === 'tombstone') {
     confirmDialog(uiText('重新运行上一轮？'), uiText('本轮可能已执行工具操作。重试会使用当前模型重新开始，已有文件改动不会自动撤销。'), uiText('重新运行'), submit);
   } else { try { await submit(); } catch (error) { fail(error); } }
 }
 async function mutate(op, body = {}, message = '') {
+  const q = currentQueue();
+  if (['go','pin','archive','restore','graft','unstage','rewind','new','resume'].includes(op)) {
+    if (sending || queueWriting) throw new Error(uiText('会话状态已变化，请重新确认。'));
+    if (q?.items.length) { q.paused = 'context'; await saveQueue(q); }
+  }
   const result = await request(op, body);
   stateReceived(result);
   if (message) toast(message);
@@ -426,7 +588,7 @@ async function inspectNode(id, focus = true) {
   const n = state.nodes.find(n => n.id === id); if (!n) { $('inspector').hidden = true; return; }
   const s = state.session;
   $('inspector').hidden = false;
-  $('inspector').innerHTML = uiHtml`<div class="inspector-head"><span class="inspector-label">${esc(n.label)}<span>${n.status === 'live' ? (id === state.trunk ? uiText('主干') : uiText('探索节点')) : n.status === 'archived' ? uiText('已归档') : uiText('不进入上下文')}</span></span><button id="inspector-close" class="icon-button" aria-label="关闭节点详情">${icon('close')}</button></div><h3>${esc(n.input || uiText('未完成的回合'))}</h3><div class="inspector-content"><div class="markdown">${markdown(n.answer || uiText('这个回合没有保存最终回答。'))}</div></div><div class="inspector-stats"><span>${M.tokens(n.ctx)} 上下文 tokens</span><span>${n.cost > 0 ? '$' + n.cost.toFixed(4) : M.tokens(n.own) + ' tokens'}</span></div><div class="node-actions">${state.retryable && id === state.latest_attempt?.id ? `<button class="primary" data-node-action="retry" ${!connected || sending || state.busy ? 'disabled' : ''}>${icon('refresh')}${uiText('重新运行上一轮')}</button>` : ''}<button class="primary" data-node-action="go" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('chat')}从这里继续</button><button data-node-action="explore" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('branch')}从这里探索</button><button data-node-action="graft" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('graft')}嫁接到当前上下文</button><button data-node-action="pin" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('pin')}设为主干</button></div><div class="secondary-actions"><button data-node-action="detail">${icon('more')}完整内容</button><button data-node-action="${n.status === 'archived' ? 'restore' : 'archive'}" ${state.busy || !['live','archived'].includes(n.status) ? 'disabled' : ''}>${icon('archive')}${n.status === 'archived' ? uiText('恢复分支') : uiText('归档分支')}</button><button data-node-action="rewind" ${state.busy ? 'disabled' : ''}>${icon('undo')}回退</button></div>`;
+  $('inspector').innerHTML = uiHtml`<div class="inspector-head"><span class="inspector-label">${esc(n.label)}<span>${n.status === 'live' ? (id === state.trunk ? uiText('主干') : uiText('探索节点')) : n.status === 'archived' ? uiText('已归档') : uiText('不进入上下文')}</span></span><button id="inspector-close" class="icon-button" aria-label="关闭节点详情">${icon('close')}</button></div><h3>${esc(n.input || uiText('未完成的回合'))}</h3><div class="inspector-content"><div class="markdown">${markdown(n.answer || uiText('这个回合没有保存最终回答。'))}</div></div><div class="inspector-stats"><span>${M.tokens(n.ctx)} 上下文 tokens</span><span>${n.cost > 0 ? '$' + n.cost.toFixed(4) : M.tokens(n.own) + ' tokens'}</span></div><div class="node-actions">${state.retryable && id === state.latest_attempt?.id && !(currentQueue()?.turn?.attemptId === id && currentQueue().turn.status === 'failed' && currentQueue().turn.attempts >= 3) ? `<button class="primary" data-node-action="retry" ${!connected || sending || state.busy ? 'disabled' : ''}>${icon('refresh')}${uiText('重新运行上一轮')}</button>` : ''}<button class="primary" data-node-action="go" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('chat')}从这里继续</button><button data-node-action="explore" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('branch')}从这里探索</button><button data-node-action="graft" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('graft')}嫁接到当前上下文</button><button data-node-action="pin" ${n.status !== 'live' || state.busy ? 'disabled' : ''}>${icon('pin')}设为主干</button></div><div class="secondary-actions"><button data-node-action="detail">${icon('more')}完整内容</button><button data-node-action="${n.status === 'archived' ? 'restore' : 'archive'}" ${state.busy || !['live','archived'].includes(n.status) ? 'disabled' : ''}>${icon('archive')}${n.status === 'archived' ? uiText('恢复分支') : uiText('归档分支')}</button><button data-node-action="rewind" ${state.busy ? 'disabled' : ''}>${icon('undo')}回退</button></div>`;
   $('inspector-close').onclick = () => { selected = null; $('inspector').hidden = true; renderTree(); };
   if (focus) centerNode(id);
   try {
@@ -503,7 +665,7 @@ function renderUpdate() {
   if (oldFocus && $(oldFocus) && !$(oldFocus).disabled) $(oldFocus).focus({preventScroll:true});
 }
 function lastDialogFocus() { if ($('overlay').hidden) dialogFocus = document.activeElement; }
-function closeDialog() { if (onboardingStep) return; if (fileDelete) { closeFileDelete(); return; } $('overlay').classList.remove('onboarding-overlay'); $('overlay').hidden = true; $('app').inert = false; if (dialogFocus?.isConnected) dialogFocus.focus({preventScroll:true}); }
+function closeDialog() { if (onboardingStep) return; if (fileDelete) { closeFileDelete(); return; } $('overlay').classList.remove('onboarding-overlay'); $('overlay').hidden = true; $('app').inert = false; if (dialogFocus?.isConnected) dialogFocus.focus({preventScroll:true}); scheduleQueue(); }
 function confirmDialog(title, description, label, action, danger = false) {
   showDialog(title, uiHtml`<p class="dialog-description">${esc(description)}</p><div id="dialog-error" class="error-message" role="alert"></div><div class="dialog-footer"><button id="cancel" class="button">取消</button><button id="confirm" class="button ${danger ? 'danger' : 'primary'}">${esc(label)}</button></div>`);
   $('cancel').onclick = closeDialog;
@@ -766,8 +928,9 @@ function workspaceDialog(items) {
   if (!items.length) return toast(uiText('当前只有一个本地工作区。'));
   showDialog(uiText('本地工作区'), uiHtml`${items.map(w => `<button class="model-option" data-workspace="${esc(w.id)}">${icon('folder')}<span>${esc(w.is_default ? uiText('默认工作区') : w.name)}</span>${icon('right')}</button>`).join('')}<div class="dialog-footer"><button id="browse-workspace" class="button">${icon('folder')}${uiText('工作区文件')}</button></div>`);
   $('browse-workspace').onclick = () => browseWorkspace('');
-  $('dialog').querySelectorAll('[data-workspace]').forEach(button => button.onclick = () => {
-    if (state?.busy) return toast(uiText('请先结束当前回合再切换工作区。'));
+  $('dialog').querySelectorAll('[data-workspace]').forEach(button => button.onclick = async () => {
+    if (state?.busy || sending || queueWriting) return toast(uiText('请先结束当前回合再切换工作区。'));
+    const q = currentQueue(); if (q?.items.length) { q.paused = 'context'; try { await saveQueue(q); } catch (error) { fail(error); return; } }
     saveDraft(); connected = false; rejectPending(uiText('正在切换工作区')); closeDialog();
     renderEngineStatus();
     Native.workspace(button.dataset.workspace);
@@ -882,12 +1045,14 @@ function fileSize(size) {
 }
 async function addAttachments(files) {
   const targetSession = state?.session;
+  const previous = attachments;
   if (attachments.length + files.length > 8) return toast(uiText('每条消息最多添加 8 个附件。'));
   try {
     const all = [...attachments, ...files];
     await request('attachments', {attachments:all});
     if (targetSession !== state?.session) return toast(uiText('对话已切换，请重新添加附件。'));
-    attachments = all; renderAttachments(); saveDraft();
+    if (attachments !== previous) return toast(uiText('草稿附件已变化，请重新添加。'));
+    attachments = all; markDraftChanged(); renderAttachments(); saveDraft();
   } catch (error) { fail(error); }
 }
 async function readFiles(files) {
@@ -925,11 +1090,20 @@ function back() {
   return true;
 }
 $('composer').onsubmit = send;
-$('draft').oninput = () => { resizeDraft(); updateComposer(); saveDraft(); };
+$('draft').oninput = () => { markDraftChanged(); resizeDraft(); updateComposer(); saveDraft(); };
 $('draft').onkeydown = event => {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229 && !matchMedia('(pointer:coarse)').matches) { event.preventDefault(); if (state?.busy || sending) toast(uiText('当前回合结束后可以发送，草稿会保留。')); else send(event); }
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229 && !matchMedia('(pointer:coarse)').matches) { event.preventDefault(); send(event); }
 };
-$('explore-toggle').onclick = () => { explore = !explore; updateComposer(); if (state) renderHeader(); saveDraft(); };
+$('explore-toggle').onclick = () => { explore = !explore; markDraftChanged(); updateComposer(); if (state) renderHeader(); saveDraft(); };
+$('queue-toggle').onclick = () => { const q = currentQueue(); if (!q || queueWriting) return; q.expanded = !q.expanded; saveQueue(q).catch(fail); updateComposer(); };
+$('queue-items').onclick = event => { const button = event.target.closest('[data-take-queued]'); if (button && !button.disabled) takeQueued(button.dataset.takeQueued); };
+$('queue-recovery').onclick = event => { if (event.target.closest('#take-uncertain')) rewriteQueuedTurn(true); };
+$('queue-resume').onclick = async () => { const q = currentQueue(); if (!q || queueWriting || q.turn?.status !== 'succeeded' || Q.position(state) !== q.anchor) return; q.paused = ''; try { await saveQueue(q); scheduleQueue(); } catch (error) { fail(error); } };
+$('stop-generation').onclick = async () => {
+  const q = currentQueue(), turn = q?.turn; if (!connected || !turn || turn.stop) return;
+  turn.stop = true; q.paused = 'stopped'; updateComposer();
+  try { await saveQueue(q); if (currentQueue() === q && q.turn === turn && (state.busy || sending)) await request('stop'); } catch (error) { fail(error); }
+};
 $('sidebar-toggle').onclick = () => rail(!$('app').classList.contains('rail-open'));
 $('sidebar-close').onclick = () => rail(false); $('scrim').onclick = () => rail(false);
 $('tree-toggle').onclick = () => tree(!$('app').classList.contains('tree-open'));
@@ -941,6 +1115,7 @@ $('workspace').onclick = () => { if (window.Native?.workspaces) Native.workspace
 $('workspace-files').onclick = () => { rail(false); browseWorkspace(''); };
 $('sessions').onclick = async event => { const button = event.target.closest('[data-session]'); if (!button) return; try { saveDraft(); await mutate('resume', {id:button.dataset.session}); rail(false); } catch (error) { fail(error); } };
 $('messages').onclick = async event => {
+  if (event.target.closest('[data-rewrite-queued]')) { rewriteQueuedTurn(); return; }
   const retry = event.target.closest('[data-retry-turn]');
   if (retry && !retry.disabled) { if (retry.dataset.retryTurn === state.latest_attempt?.id) await retryLatest(); return; }
   const node = event.target.closest('[data-node]'), branch = event.target.closest('[data-branch]'), copyTurn = event.target.closest('[data-copy-turn]');
@@ -955,7 +1130,7 @@ $('tree-stage').onclick = event => {
 };
 $('inspector').onclick = event => { const button = event.target.closest('[data-node-action]'); if (button && !button.disabled) nodeAction(button.dataset.nodeAction); };
 $('pending').onclick = event => { const button = event.target.closest('[data-unstage]'); if (button) mutate('unstage', {id:button.dataset.unstage}).catch(fail); };
-$('attachments').onclick = event => { const button = event.target.closest('[data-remove-file]'); if (button) { attachments.splice(Number(button.dataset.removeFile),1); renderAttachments(); saveDraft(); } };
+$('attachments').onclick = event => { const button = event.target.closest('[data-remove-file]'); if (button) { attachments = attachments.filter((_,index)=>index!==Number(button.dataset.removeFile)); markDraftChanged(); renderAttachments(); saveDraft(); } };
 $('zoom-out').onclick = () => { zoom = Math.max(.4, zoom - .15); renderTree(); };
 $('zoom-in').onclick = () => { zoom = Math.min(1.6, zoom + .15); renderTree(); };
 $('tree-fit').onclick = fitTree;
@@ -996,6 +1171,9 @@ window.addEventListener('beforeunload', saveDraft);
 try { drafts = JSON.parse(localStorage.getItem('kaipi.drafts') || '{}'); } catch { }
 KaipiLocale.initStatic($('app'));
 window.kaipi = {receive, back};
+if (window.ResizeObserver) new ResizeObserver(entries => {
+  $('jump-bottom').style.bottom = `${entries[0].target.getBoundingClientRect().height + 12}px`;
+}).observe(document.querySelector('.composer-area'));
 updateOnboarding();
 renderEngineStatus();
 if (matchMedia('(min-width:801px)').matches) rail(true);

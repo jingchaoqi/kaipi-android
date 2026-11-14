@@ -11,6 +11,7 @@
 <script defer src="vendor/marked.js"></script>
 <script defer src="render.js"></script>
 <script defer src="model.js"></script>
+<script defer src="outbox.js"></script>
 <script defer src="app.js"></script>
 </head>
 <body>
@@ -87,10 +88,15 @@
   <footer class="composer-area">
     <div id="context-bar" class="context-bar"><div id="connection" class="connection" role="status" aria-live="polite"><span class="engine-sprout" aria-hidden="true"><i></i><i></i><i></i></span><span>正在加载kaipi引擎</span></div><button id="cursor-chip" class="cursor-chip" hidden><span class="status-dot"></span><span>新的起点</span><svg><use href="#i-down"/></svg></button><span id="context-size" hidden>上下文 0 tokens</span><button id="provider-reminder" class="provider-reminder" hidden>首次对话前连接模型</button></div>
     <div id="pending" class="pending"></div>
+    <section id="message-queue" class="message-queue" aria-label="待发送消息" hidden>
+      <div class="message-queue-head"><button id="queue-toggle" type="button" aria-expanded="true" aria-controls="queue-items"><svg><use href="#i-chat"/></svg><span id="queue-label"></span><svg><use href="#i-down"/></svg></button><button id="queue-resume" type="button" class="text-button" hidden>继续队列</button></div>
+      <div id="queue-items"></div><p id="queue-hint" role="status" aria-live="polite"></p>
+    </section>
+    <div id="queue-recovery" class="queue-recovery" role="status" hidden></div>
     <form id="composer" class="composer">
       <div id="attachments" class="attachments"></div>
       <textarea id="draft" placeholder="写下你的想法…" rows="1" aria-label="消息" maxlength="200000"></textarea>
-      <div class="composer-tools"><div class="composer-left"><button id="attach" type="button" class="icon-button" aria-label="添加附件"><svg><use href="#i-paperclip"/></svg></button><button id="explore-toggle" type="button" class="explore-toggle" aria-pressed="false"><svg><use href="#i-branch"/></svg><span>探索</span></button></div><button id="send" class="send" type="submit" aria-label="发送消息" disabled><svg><use href="#i-arrow"/></svg></button></div>
+      <div class="composer-tools"><div class="composer-left"><button id="attach" type="button" class="icon-button" aria-label="添加附件"><svg><use href="#i-paperclip"/></svg></button><button id="explore-toggle" type="button" class="explore-toggle" aria-pressed="false"><svg><use href="#i-branch"/></svg><span>探索</span></button></div><div class="composer-submit"><button id="stop-generation" type="button" class="stop-generation" aria-label="停止生成" hidden><svg><use href="#i-stop"/></svg><span>停止</span></button><button id="send" class="send" type="submit" aria-label="发送消息" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
     </form>
     <div class="composer-note"><span>分支中探索 · 主干上创造</span><span id="spend">kaipi · 本地运行</span></div>
   </footer>
