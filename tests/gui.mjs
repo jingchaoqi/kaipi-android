@@ -66,8 +66,8 @@ try {
   await page.waitForFunction(()=>document.getElementById('draft').value==='保留一段未发送的想法');
   await page.click('#send');
   await page.waitForSelector('#live-turn');
-  await page.waitForFunction(()=>document.getElementById('send').getAttribute('aria-label')==='停止生成');
-  await page.click('#send');
+  await page.waitForFunction(()=>!document.getElementById('stop-generation').hidden);
+  await page.click('#stop-generation');
   await page.waitForFunction(()=>document.getElementById('send').getAttribute('aria-label')==='发送消息');
   await page.fill('#draft','继续这个想法');
   await page.click('#send');

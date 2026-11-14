@@ -67,7 +67,7 @@ try {
   await page.route('**/rpc',delayAck);
   await page.click('.turn-actions [data-retry-turn]');
   await page.waitForTimeout(220);
-  assert.equal(await page.getAttribute('#send','aria-label'),'停止生成');
+  assert.equal(await page.locator('#stop-generation').isVisible(),true);
   assert.equal(await page.locator('.retry-panel').count(),0);
   await settled();await page.waitForTimeout(900);
   assert.equal(retries.length,3);
@@ -86,8 +86,8 @@ try {
   assert.equal(await page.locator('.retry-panel').count(),0);
 
   await page.fill('#draft','retry-stop 等待期间停止');await page.click('#send');
-  await page.waitForFunction(()=>document.getElementById('send').getAttribute('aria-label')==='停止生成');
-  await page.click('#send');await page.waitForSelector('.retry-panel');await settled();
+  await page.waitForFunction(()=>!document.getElementById('stop-generation').hidden);
+  await page.click('#stop-generation');await page.waitForSelector('.retry-panel');await settled();
   await page.evaluate(()=>kaipi.receive({event:'disconnected',data:'test disconnect'}));
   assert.equal(await page.locator('.retry-button').isDisabled(),true);
   await page.click('#retry-engine');await page.waitForSelector('.retry-panel');

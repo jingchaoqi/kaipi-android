@@ -54,6 +54,16 @@ core 负责恢复原输入、附件及嫁接快照、保留主干或探索身份
 重试使用当前模型，保留新草稿；可能执行过工具时先用应用内确认界面提示已有改动会保留。
 请求确认超时只同步执行状态，不自动重新发送；界面重连后依据 core 状态恢复。
 
+## 消息排队
+
+执行中仍可输入、添加附件并提交，最多保留 3 条待发送消息，不含当前执行中的请求。发送与停止为独立按钮；没有执行中的请求且队列为空时立即恢复普通发送，未提交的草稿不会自动执行。
+
+`ui/outbox.js` 只保存 Android 应用层的调度数据，通过私有 WebView IndexedDB 按会话隔离存储消息、附件、探索选项、上下文位置与尝试次数。先持久化正在提交的请求，再调用现有 `turn` / `retry` 接口。只有 `settled` 或重连核对得到的 core 快照证明当前尝试成功且游标位于新节点时，才取队首作为下一个请求；不会向 core 提前提交并发请求，也不提前生成上下文节点。
+
+失败或停止保留后续队列，等待用户重试原请求；每个失败请求最多追加 2 次手动重试（总计 3 次执行）。重试仍由 core 恢复输入、附件与上下文快照，可能执行过工具的确认规则不变。次数用尽后 Toast 提醒修改指令，用户明确点击「取消排队并修改指令」才取消后续消息并回填原输入与附件。失败历史保留。
+
+队列 × 表示取回编辑，移出该条并恢复文字、附件与探索选项；已有草稿时使用自绘确认，取消保持两边原样。重新提交排到队尾。持久化失败不会发出请求或丢弃输入；确认超时、迟到回复与重新打开会核对已保存的执行记录，不自动重发结果不明的请求。切换会话、工作区或改变树位置/嫁接时暂停队列，回到原上下文后才允许明确继续，失败依赖不能被「继续队列」跳过。
+
 ## 文件交付
 
 工作区仍位于应用私有的 `files/workspaces/<UUID>/`，不迁移旧数据。菜单「工作区文件」独立于 core 进程浏览目录；Markdown 相对文件链接及工作区内的 `file:` 链接由 Android 接管。新会话的应用层说明约定交付真实文件与相对 Markdown 链接，并说明 HTML 预览离线运行。
@@ -134,6 +144,7 @@ npx playwright install chromium
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/gui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/onboarding.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/retry.mjs
+KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/queue.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/platform-ui.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/menu-gesture.mjs
 KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
@@ -151,7 +162,7 @@ KAIPI_TEST_PYTHON=.tools/host-tests/bin/python node tests/workspace-files.mjs
 
 - 平台：62 项 JVM/Robolectric 用例（60 通过，2 项按 Android API 条件跳过），覆盖 Android 9/13 的亮屏窗口生命周期、完成/失败/取消、迟到确认、公开 Downloads、下载复用、安装授权/取消、文件丢失、APK 替换和摘要拒绝，以及文件路径边界、只读分享、Downloads 保存/失败清理、ZIP 资源保留、独立预览无桥接接口与亮屏状态。预览页测试覆盖保存/分享触觉反馈、保存中禁用、中英成功/失败 Toast 和重名后的真实保存位置。更新菜单的中英/主题/窄屏及语言图标对齐、键盘展开标题位置回归通过。Robolectric 结果不等同于真机安装器验收。
 
-- 主机：17 项桥接集成测试、3 项树布局测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
+- 主机：17 项桥接集成测试、3 项树布局和 6 项队列调度测试通过；桥接回归覆盖非 UTF-8 stdout/stderr、正常中文、对话完成、历史重载及继续下一轮，以及重试的快照恢复、身份保持、并发占用和上下文拒绝。排队浏览器测试还覆盖顺序与节点父子关系、3 条上限、取回编辑与草稿替换、附件、重试上限、重连、迟到确认、存储回滚竞争和上下文暂停。浏览器端到端验证了会话、树操作、停止、草稿、HTML 安全渲染、主题保存与系统跟随、窄屏键盘和减少动态效果；重试浏览器测试还覆盖失败卡片、附件、刷新恢复、草稿、双击防重、确认超时、工具确认和中英主题切换。
 - 双架构 debug APK 构建、7 项 APK 完整性/ABI/上游 wheel 一致性及固定签名检查通过；Android lint 为 0 errors、3 warnings。
 - 此前版本的 Android 11 x86_64 软件模拟器验收：GUI 与真实 core 连接成功，旧工作区恢复；独立 CPython、原生模块、shell、Git 快照/回退、会话保存、可信 HTTPS 与拒绝不可信证书、Anthropic/OpenAI 兼容模型请求、桥接执行与主题持久化均通过。模型是本地 mock，没有使用真实服务商 API key。
 - 云环境无 KVM，软件模拟器上的初次导入明显慢于正常设备；此结果不代表真机启动性能或中文输入法已验收。

@@ -30,6 +30,7 @@ parser.add_argument('--seed', action='store_true', help='Seed a branching conver
 parser.add_argument('--first-run', action='store_true')
 parser.add_argument('--delay-ready', type=float, default=0)
 parser.add_argument('--retry-fixture', action='store_true', help='Simulate retryable failures for GUI integration tests')
+parser.add_argument('--queue-fixture', action='store_true', help='Slow deterministic turns and persistent failures for queue tests')
 args = parser.parse_args()
 temporary = tempfile.TemporaryDirectory(prefix='kaipi-preview-')
 cwd = Path(temporary.name)
@@ -55,9 +56,11 @@ class FixtureProvider:
     def __init__(self): self.failed = set()
     def count_tokens(self, text): return len(text)//2
     def complete(self, system, messages, cache_points):
-        time.sleep(.55)
-        if args.retry_fixture:
+        time.sleep(1.8 if args.queue_fixture else .55)
+        if args.retry_fixture or args.queue_fixture:
             question = next((b['text'] for m in reversed(messages) if m['role']=='user' for b in (m['content'] if isinstance(m['content'],list) else []) if b.get('type')=='text' and not b['text'].startswith('<kaipi:')), '')
+            if args.queue_fixture and question.startswith('queue-fail'):
+                raise ConnectionError('Queue fixture connection interrupted')
             tool_result = any(b.get('type')=='tool_result' for b in messages[-1]['content'])
             if question.startswith(('retry-tool','retry-stop')) and not tool_result:
                 return Reply(content=[{'type':'tool_use','id':'fixture-tool','name':'bash','input':{'command':'printf PREVIOUS_TOOL_OUTPUT'}}],stop_reason='tool_use',usage=Usage(output=3))
